@@ -2,8 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from io import StringIO
+from io import StringIO, BytesIO
 import re
+import base64
+from datetime import datetime
 
 # ==================== 自定义梯形积分函数（兼容所有 NumPy 版本）====================
 def trapezoid(y, x):
@@ -93,6 +95,19 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'lux_label': '视觉照度 (Illuminance)',
         'medi_delta': '≈ EML x 0.9063',
         
+        'well_comparison_title': '📋 与 WELL 标准对比',
+        'well_table_header': 'WELL 等级',
+        'well_eml_requirement': 'EML 要求',
+        'well_medi_requirement': 'm-EDI 要求',
+        'well_status': '当前状态',
+        'well_excellent': '高品质推荐',
+        'well_basis_a': '基础达标 (方案A)',
+        'well_basis_b': '基础达标 (方案B)',
+        'well_below': '未达标',
+        'well_meet': '✅ 达标',
+        'well_not_meet': '❌ 未达标',
+        'well_exceed': '✨ 超出标准',
+        
         'rating_excellent': '⭐ **日间健康评级：优秀** (EML {:.0f} ≥ 250) — 有助于提升日间警觉性与工作效率',
         'rating_good': '🌤️ **日间健康评级：基础达标** (EML {:.0f} ≥ 150) — 满足 WELL 基础要求',
         'rating_night': '🌙 **夜间模式识别** (EML {:.0f} ≤ 50) — 适合睡前照明环境',
@@ -111,7 +126,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **边界处理**: 超出 380-780nm 范围的数据自动补 0
         ''',
         
-        'export_btn': '📥 导出计算结果 (CSV)',
+        'export_btn': '📥 导出完整报告 (HTML)',
         
         'warning_input': '请先上传文件或输入数据。',
         'error_parse': '光谱数据解析失败，请检查格式。需要两列：波长(nm) 和 功率(W/m²/nm)',
@@ -122,7 +137,12 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'detected': '📊 检测到输入数据: 波长范围 {:.0f} - {:.0f} nm，平均步长 {:.2f} nm，数据点数量: {}',
         
         'name_placeholder': '请输入姓名',
-        'title_placeholder': '请输入头衔（可选）'
+        'title_placeholder': '请输入头衔（可选）',
+        
+        'report_title': '健康照明 EML/m-EDI 分析报告',
+        'report_date': '报告日期',
+        'report_analyst': '分析人',
+        'report_summary': '结论摘要'
     },
     'en': {
         'page_title': 'Healthy Lighting Calculator (EML / m-EDI)',
@@ -180,6 +200,19 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'lux_label': 'Illuminance',
         'medi_delta': '≈ EML x 0.9063',
         
+        'well_comparison_title': '📋 WELL Standard Comparison',
+        'well_table_header': 'WELL Level',
+        'well_eml_requirement': 'EML Requirement',
+        'well_medi_requirement': 'm-EDI Requirement',
+        'well_status': 'Status',
+        'well_excellent': 'High Quality',
+        'well_basis_a': 'Basic (Option A)',
+        'well_basis_b': 'Basic (Option B)',
+        'well_below': 'Below Standard',
+        'well_meet': '✅ Meet',
+        'well_not_meet': '❌ Not Meet',
+        'well_exceed': '✨ Exceed',
+        
         'rating_excellent': '⭐ **Daytime Rating: Excellent** (EML {:.0f} ≥ 250) — Promotes daytime alertness and work efficiency',
         'rating_good': '🌤️ **Daytime Rating: Basic Compliance** (EML {:.0f} ≥ 150) — Meets WELL basic requirements',
         'rating_night': '🌙 **Nighttime Mode Detected** (EML {:.0f} ≤ 50) — Suitable for pre-sleep lighting',
@@ -198,7 +231,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **Boundary Handling**: Values outside 380-780nm are automatically set to 0
         ''',
         
-        'export_btn': '📥 Export Results (CSV)',
+        'export_btn': '📥 Export Full Report (HTML)',
         
         'warning_input': 'Please upload a file or enter data first.',
         'error_parse': 'Failed to parse spectral data. Please check format. Need two columns: Wavelength(nm) and Power(W/m²/nm)',
@@ -209,9 +242,15 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'detected': '📊 Detected input: wavelength range {:.0f} - {:.0f} nm, average step {:.2f} nm, data points: {}',
         
         'name_placeholder': 'Enter your name',
-        'title_placeholder': 'Enter your title (optional)'
+        'title_placeholder': 'Enter your title (optional)',
+        
+        'report_title': 'Healthy Lighting EML/m-EDI Analysis Report',
+        'report_date': 'Report Date',
+        'report_analyst': 'Analyst',
+        'report_summary': 'Summary'
     }
 }
+
 
 # ==================== 核心数据加载 ====================
 
@@ -219,7 +258,7 @@ def load_spectral_data():
     """加载明视觉 (V_lambda) 和黑视素 (Nz_lambda) 的光谱光视效率。波长范围: 380nm 到 780nm, 步长 5nm"""
     wavelengths = np.arange(380, 785, 5)
     
-    # V(λ) 数据 - 基于 CIE 1924 明视觉标准
+    # V(λ) 数据
     v_lambda_raw = [0.0000, 0.0000, 0.0000, 0.0001, 0.0002, 0.0004, 0.0006, 0.0010, 0.0017, 0.0026,
                     0.0040, 0.0060, 0.0090, 0.0130, 0.0180, 0.0250, 0.0340, 0.0450, 0.0590, 0.0760,
                     0.0960, 0.1210, 0.1500, 0.1840, 0.2220, 0.2650, 0.3120, 0.3630, 0.4170, 0.4740,
@@ -240,7 +279,7 @@ def load_spectral_data():
                     0.0100, 0.0070, 0.0040, 0.0020, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
                     0.0000, 0.0000, 0.0000, 0.0000, 0.0000]
     
-    # Nz(λ) 黑视素数据 - 基于 CIE S026 标准 (峰值 480 nm)
+    # Nz(λ) 黑视素数据
     nz_lambda_raw = [0.0000, 0.0001, 0.0002, 0.0004, 0.0008, 0.0014, 0.0023, 0.0037, 0.0059, 0.0091,
                      0.0139, 0.0209, 0.0308, 0.0445, 0.0632, 0.0882, 0.1207, 0.1620, 0.2131, 0.2749,
                      0.3476, 0.4310, 0.5245, 0.6269, 0.7357, 0.8476, 0.9531, 1.0000, 0.9955, 0.9482,
@@ -313,7 +352,6 @@ def linear_interpolate_to_standard_grid(x_input, y_input, x_standard):
     y_input = np.asarray(y_input)
     x_standard = np.asarray(x_standard)
     
-    # 线性插值，超出范围补0
     y_interpolated = np.interp(x_standard, x_input, y_input, left=0, right=0)
     
     return y_interpolated
@@ -324,23 +362,17 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     wavelengths = np.asarray(wavelengths)
     spectrum = np.asarray(spectrum_w_m2_nm)
     
-    # 加载标准函数 (5nm 步长)
     std_wavelengths, v_lambda, nz_lambda = load_spectral_data()
     
-    # 使用线性插值将用户光谱映射到标准波长网格
     interp_spectrum = linear_interpolate_to_standard_grid(wavelengths, spectrum, std_wavelengths)
     
-    # 使用简化公式: EML = 72983.25 * ∫ E(λ) * Nz(λ) dλ
-    # 使用自定义梯形积分函数（兼容所有 NumPy 版本）
     weighted = interp_spectrum * nz_lambda
     weighted_integral_nz = trapezoid(weighted, std_wavelengths)
     eml_constant = 72983.25
     eml_value = eml_constant * weighted_integral_nz
     
-    # m-EDI ≈ EML × 0.9063
     medi_value = eml_value * 0.9063
     
-    # 视觉照度 E_v = Km * ∫ E(λ) * V(λ) dλ
     km = 683.002
     weighted_visual = interp_spectrum * v_lambda
     weighted_integral_v = trapezoid(weighted_visual, std_wavelengths)
@@ -354,10 +386,236 @@ def check_wavelength_overlap(wavelengths):
     std_min, std_max = 380, 780
     input_min, input_max = np.min(wavelengths), np.max(wavelengths)
     
-    # 检查是否有重叠
     if input_max < std_min or input_min > std_max:
         return False, None, None
     return True, input_min, input_max
+
+
+def get_well_comparison(eml):
+    """获取与 WELL 标准的对比结果"""
+    well_standards = [
+        {'level': 'well_excellent', 'eml_min': 250, 'medi_min': 227},
+        {'level': 'well_basis_a', 'eml_min': 200, 'medi_min': 182},
+        {'level': 'well_basis_b', 'eml_min': 150, 'medi_min': 136},
+    ]
+    
+    results = []
+    for std in well_standards:
+        eml_met = eml >= std['eml_min']
+        results.append({
+            'level': std['level'],
+            'eml_min': std['eml_min'],
+            'medi_min': std['medi_min'],
+            'eml_met': eml_met,
+            'medi_met': eml >= std['eml_min']  # m-EDI 条件相同
+        })
+    
+    return results
+
+
+def generate_html_report(t, analyst_name, analyst_title, eml, medi, lux, well_results, fig, input_min, input_max, step, num_points):
+    """生成 HTML 格式的报告"""
+    
+    # 获取健康评级文本
+    if eml >= 250:
+        rating_text = "优秀 - 日间使用推荐"
+        rating_color = "#22c55e"
+    elif eml >= 150:
+        rating_text = "基础达标 - 满足 WELL 基础要求"
+        rating_color = "#3b82f6"
+    elif eml <= 50:
+        rating_text = "夜间模式 - 适合睡前照明"
+        rating_color = "#8b5cf6"
+    else:
+        rating_text = "中等刺激 - 需根据使用时间评估"
+        rating_color = "#f59e0b"
+    
+    # 生成 WELL 对比表格行
+    well_rows = ""
+    for r in well_results:
+        level_text = t[r['level']]
+        status_icon = "✅" if r['eml_met'] else "❌"
+        status_text = t['well_meet'] if r['eml_met'] else t['well_not_meet']
+        row_color = "#f0fdf4" if r['eml_met'] else "#fef2f2"
+        well_rows += f"""
+        <tr style="background-color: {row_color};">
+            <td style="padding: 8px; border: 1px solid #ddd;">{level_text}</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">≥ {r['eml_min']} lx</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">≥ {r['medi_min']} lx</td>
+            <td style="padding: 8px; border: 1px solid #ddd;">{status_icon} {status_text}</td>
+        </tr>
+        """
+    
+    # 获取光谱图的 base64 编码
+    img_bytes = fig.to_image(format="png", width=800, height=500)
+    img_base64 = base64.b64encode(img_bytes).decode()
+    
+    # 分析人信息
+    analyst_info = analyst_name if analyst_name else "未填写"
+    if analyst_title:
+        analyst_info += f" ({analyst_title})"
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{t['report_title']}</title>
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                max-width: 1000px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }}
+            .container {{
+                background-color: white;
+                border-radius: 12px;
+                padding: 30px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            h1 {{
+                color: #1e3a5f;
+                border-bottom: 3px solid #4f46e5;
+                padding-bottom: 10px;
+            }}
+            h2 {{
+                color: #334155;
+                margin-top: 25px;
+                border-left: 4px solid #4f46e5;
+                padding-left: 15px;
+            }}
+            .header-info {{
+                background-color: #f8fafc;
+                padding: 15px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+            }}
+            .metrics {{
+                display: flex;
+                gap: 20px;
+                margin: 20px 0;
+                flex-wrap: wrap;
+            }}
+            .metric-card {{
+                flex: 1;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 20px;
+                border-radius: 12px;
+                text-align: center;
+                min-width: 150px;
+            }}
+            .metric-card.illuminance {{
+                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            }}
+            .metric-value {{
+                font-size: 36px;
+                font-weight: bold;
+            }}
+            .metric-label {{
+                font-size: 14px;
+                opacity: 0.9;
+                margin-top: 5px;
+            }}
+            .rating-badge {{
+                display: inline-block;
+                background-color: {rating_color};
+                color: white;
+                padding: 8px 16px;
+                border-radius: 20px;
+                font-weight: bold;
+                margin: 15px 0;
+            }}
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin: 15px 0;
+            }}
+            th {{
+                background-color: #4f46e5;
+                color: white;
+                padding: 10px;
+                border: 1px solid #ddd;
+            }}
+            .footer {{
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 1px solid #ddd;
+                font-size: 12px;
+                color: #666;
+                text-align: center;
+            }}
+            .spectrum-img {{
+                width: 100%;
+                margin: 20px 0;
+                border-radius: 8px;
+                border: 1px solid #ddd;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>💡 {t['report_title']}</h1>
+            
+            <div class="header-info">
+                <p><strong>{t['report_date']}:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>{t['report_analyst']}:</strong> {analyst_info}</p>
+            </div>
+            
+            <h2>📊 {t['result_title']}</h2>
+            <div class="metrics">
+                <div class="metric-card">
+                    <div class="metric-value">{eml:.1f} lx</div>
+                    <div class="metric-label">{t['eml_label']}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">{medi:.1f} lx</div>
+                    <div class="metric-label">{t['medi_label']}</div>
+                </div>
+                <div class="metric-card illuminance">
+                    <div class="metric-value">{lux:.1f} lx</div>
+                    <div class="metric-label">{t['lux_label']}</div>
+                </div>
+            </div>
+            
+            <div class="rating-badge">{rating_text}</div>
+            
+            <h2>📋 {t['well_comparison_title']}</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>{t['well_table_header']}</th>
+                        <th>{t['well_eml_requirement']}</th>
+                        <th>{t['well_medi_requirement']}</th>
+                        <th>{t['well_status']}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {well_rows}
+                </tbody>
+            </table>
+            
+            <h2>📈 {t['vis_title']}</h2>
+            <img src="data:image/png;base64,{img_base64}" class="spectrum-img" alt="Spectral Visualization">
+            
+            <h2>🔧 {t['data_note_title']}</h2>
+            <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px;">
+                <ul style="margin: 0;">
+                    <li>{t['data_note_content'].format(num_points, input_min, input_max, step, 81)}</li>
+                </ul>
+            </div>
+            
+            <div class="footer">
+                {t['footer']}
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html_content
 
 
 # ==================== Streamlit UI ====================
@@ -374,44 +632,11 @@ def main():
     lang = st.session_state.lang
     t = LANGUAGES[lang]
     
+    # 存储计算结果到 session_state
+    if 'calc_results' not in st.session_state:
+        st.session_state.calc_results = None
+    
     # ==================== 自定义CSS（仅语言按钮红底白字）====================
-    st.markdown("""
-    <style>
-    /* 只针对语言按钮（通过 key 精确选择） */
-    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("中文")),
-    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("English")) {
-        background-color: #dc2626 !important;
-        color: white !important;
-        font-weight: bold !important;
-        border: none !important;
-    }
-    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("中文")):hover,
-    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("English")):hover {
-        background-color: #b91c1c !important;
-        color: white !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # ==================== 顶部：标题 + 语言按钮 ====================
-    title_col, spacer, lang_col1, lang_col2 = st.columns([3, 4, 0.8, 0.8])
-    
-    with title_col:
-        st.title("💡 " + t['page_title'])
-    
-    # 使用单独的容器和自定义 HTML 包装语言按钮，确保样式独立
-    with lang_col1:
-        # 使用 st.button 但通过 CSS 类名精确控制
-        if st.button("中文", key="lang_zh_top", use_container_width=True):
-            st.session_state.lang = "zh"
-            st.rerun()
-    
-    with lang_col2:
-        if st.button("English", key="lang_en_top", use_container_width=True):
-            st.session_state.lang = "en"
-            st.rerun()
-    
-    # 额外 CSS：精确控制特定 key 的按钮
     st.markdown("""
     <style>
     /* 精确选择器：只针对 key 为 lang_zh_top 和 lang_en_top 的按钮 */
@@ -425,7 +650,7 @@ def main():
         background-color: #b91c1c !important;
         color: white !important;
     }
-    /* 确保其他按钮不受影响 - 重置其他按钮样式 */
+    /* 确保其他按钮不受影响 */
     button:not([key="lang_zh_top"]):not([key="lang_en_top"]) {
         background-color: transparent !important;
         color: inherit !important;
@@ -433,11 +658,27 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
+    # ==================== 顶部：标题 + 语言按钮 ====================
+    title_col, spacer, lang_col1, lang_col2 = st.columns([3, 4, 0.8, 0.8])
+    
+    with title_col:
+        st.title("💡 " + t['page_title'])
+    
+    with lang_col1:
+        if st.button("中文", key="lang_zh_top", use_container_width=True):
+            st.session_state.lang = "zh"
+            st.rerun()
+    
+    with lang_col2:
+        if st.button("English", key="lang_en_top", use_container_width=True):
+            st.session_state.lang = "en"
+            st.rerun()
+    
     st.markdown(t['page_subtitle'])
     
     # ==================== 左侧边栏 ====================
     with st.sidebar:
-        # 1. 关于系统（最上面作为标题）
+        # 关于系统
         st.header(t['about_system'])
         
         # 分析人姓名输入
@@ -460,9 +701,9 @@ def main():
         # 分隔线
         st.markdown("---")
         
-        # 2. 背景知识与计算公式（折叠）
-        with st.expander(t['theory_title'], expanded=False):
-            st.markdown(t['theory_content'])
+        # 背景知识与计算公式（直接显示，不折叠）
+        st.markdown(f"### {t['theory_title']}")
+        st.markdown(t['theory_content'])
         
         # 显示分析人信息（如果已输入）
         if analyst_name:
@@ -516,6 +757,16 @@ def main():
                 # 核心计算
                 eml, medi, lux, interp_spectrum, std_wl, v_data, nz_data = calculate_eml_and_medi(wl_input, power_input)
                 
+                # 保存到 session_state
+                st.session_state.calc_results = {
+                    'eml': eml, 'medi': medi, 'lux': lux,
+                    'wl_input': wl_input, 'power_input': power_input,
+                    'interp_spectrum': interp_spectrum, 'std_wl': std_wl,
+                    'input_min': input_min, 'input_max': input_max,
+                    'step': step, 'num_points': len(wl_input),
+                    'v_data': v_data, 'nz_data': nz_data
+                }
+                
                 # 显示结果
                 st.subheader(t['result_title'])
                 col1, col2, col3 = st.columns(3)
@@ -535,6 +786,28 @@ def main():
                     st.info(t['rating_night'].format(eml))
                 else:
                     st.warning(t['rating_moderate'].format(eml))
+                
+                # 与 WELL 标准对比
+                st.subheader(t['well_comparison_title'])
+                well_results = get_well_comparison(eml)
+                
+                # 创建对比表格
+                well_df = pd.DataFrame([
+                    {
+                        t['well_table_header']: t[r['level']],
+                        t['well_eml_requirement']: f"≥ {r['eml_min']} lx",
+                        t['well_medi_requirement']: f"≥ {r['medi_min']} lx",
+                        t['well_status']: "✅ " + t['well_meet'] if r['eml_met'] else "❌ " + t['well_not_meet']
+                    }
+                    for r in well_results
+                ])
+                st.table(well_df)
+                
+                # 添加未达标提示
+                if eml < 150:
+                    st.warning("⚠️ 当前 EML 值低于 WELL 基础达标要求 (≥150 lx)，建议调整光源光谱或增加照度。")
+                elif eml >= 250:
+                    st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
                 # 绘图
                 st.subheader(t['vis_title'])
@@ -584,19 +857,18 @@ def main():
                         len(wl_input), input_min, input_max, step, len(std_wl)
                     ))
                 
-                # 导出按钮
-                export_df = pd.DataFrame({
-                    'Wavelength_nm': std_wl, 
-                    'Interpolated_Spectrum_W_m2_nm': interp_spectrum,
-                    'V_lambda': v_data,
-                    'Nz_lambda': nz_data,
-                    'Circadian_Spectrum_SPDxNz': interp_spectrum * nz_data
-                })
+                # 导出报告按钮
+                html_report = generate_html_report(
+                    t, analyst_name, analyst_title, eml, medi, lux, 
+                    well_results, fig, input_min, input_max, step, len(wl_input)
+                )
+                
                 st.download_button(
                     label=t['export_btn'],
-                    data=export_df.to_csv(index=False),
-                    file_name='eml_calculation_result.csv',
-                    mime='text/csv'
+                    data=html_report,
+                    file_name=f"EML_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                    mime="text/html",
+                    use_container_width=True
                 )
         else:
             st.error(t['error_parse'])
