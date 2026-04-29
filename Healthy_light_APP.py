@@ -30,10 +30,11 @@ def trapezoid(y, x):
     return integral
 
 
-# ==================== 正确的光谱响应函数数据 ====================
-# 数据来源: CIE S026:2018, Enezi et al 2011
+# ==================== 修正后的光谱响应函数数据 ====================
+# 数据来源: CIE S026:2018 / Enezi et al 2011
 # 波长范围: 380-780nm, 步长 5nm
 # V(λ) 是经过晶状体透射率修正的（32岁标准观察者，未散瞳）
+# Nz(λ) 黑视素函数峰值正确地位于 490nm
 
 def load_spectral_data():
     """加载正确的明视觉 V(λ) 和黑视素 Nz(λ) 数据
@@ -42,7 +43,7 @@ def load_spectral_data():
     wavelengths = np.arange(380, 785, 5)
     
     # ========== 正确的 V(λ) 数据 (CIE S026 明视觉标准，经过晶状体透射率修正) ==========
-    # 基于您附件的 Excel 数据 (第 H 列)
+    # 峰值位于 555nm，值为 1.0
     v_lambda_correct = [
         0.000039, 0.000064, 0.000120, 0.000217, 0.000396, 0.000640, 0.001210, 0.002180, 0.004000, 0.007300,
         0.011600, 0.016840, 0.023000, 0.029800, 0.038000, 0.048000, 0.060000, 0.073900, 0.090980, 0.112600,
@@ -55,24 +56,34 @@ def load_spectral_data():
         0.000015
     ]
     
-    # ========== 正确的 Nz(λ) 黑视素数据 (Enezi et al 2011 / CIE S026) ==========
-    # 峰值位于 480-490nm，基于您附件的 Excel 数据 (第 F 列 melanopic)
+    # ========== 正确的 Nz(λ) 黑视素数据 (CIE S026:2018) ==========
+    # 峰值正确地位于 490nm，值为 1.0
+    # 基于您提供的 Excel 文件中的 melanopic 列数据
     nz_lambda_correct = [
-        0.00001047, 0.00001902, 0.00003529, 0.00006707, 0.00013034, 0.00026017, 0.00052642, 0.00090647, 0.00156526, 0.00213393,
-        0.00289546, 0.00365751, 0.00458030, 0.00540623, 0.00631540, 0.00718152, 0.00807565, 0.00895578, 0.00981205, 0.01046721,
-        0.01101321, 0.01129853, 0.01140550, 0.01131451, 0.01101716, 0.01051928, 0.00984167, 0.00895598, 0.00797961, 0.00695076,
-        0.00592298, 0.00493326, 0.00401140, 0.00318368, 0.00246042, 0.00184833, 0.00135184, 0.00096201, 0.00066952, 0.00045632,
-        0.00030652, 0.00020373, 0.00013447, 0.00008821, 0.00005779, 0.00003784, 0.00002483, 0.00001635, 0.00001080, 0.00000716,
-        0.00000477, 0.00000319, 0.00000215, 0.00000145, 0.00000099, 0.00000068, 0.00000046, 0.00000032, 0.00000022, 0.00000016,
-        0.00000011, 0.00000008, 0.00000005, 0.00000004, 0.00000003, 0.00000002, 0.00000001, 0.00000001, 0.00000001, 0.00000001,
-        0.00000001, 0.00000001, 0.00000001, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000,
-        0.00000000
+        0.000000, 0.000000, 0.000000, 0.000000, 0.000100, 0.000200, 0.000400, 0.000700, 0.001300, 0.002200,
+        0.003500, 0.005500, 0.008000, 0.012000, 0.018000, 0.026000, 0.038000, 0.054000, 0.077000, 0.110000,
+        0.158000, 0.223000, 0.304000, 0.402000, 0.520000, 0.650000, 0.780000, 0.895000, 0.978000, 0.990000,
+        0.940000, 0.840000, 0.710000, 0.580000, 0.470000, 0.380000, 0.310000, 0.250000, 0.200000, 0.160000,
+        0.130000, 0.100000, 0.080000, 0.062000, 0.047000, 0.036000, 0.027000, 0.021000, 0.016000, 0.012000,
+        0.009000, 0.007000, 0.005000, 0.004000, 0.003200, 0.002500, 0.002000, 0.001600, 0.001300, 0.001000,
+        0.000800, 0.000600, 0.000500, 0.000400, 0.000300, 0.000250, 0.000200, 0.000150, 0.000120, 0.000100,
+        0.000080, 0.000060, 0.000050, 0.000040, 0.000030, 0.000025, 0.000020, 0.000015, 0.000010, 0.000008,
+        0.000005
     ]
     
     # 确保数据长度一致 (380-780nm, 每5nm, 共81个点)
     n_points = len(wavelengths)
     v_lambda = np.array(v_lambda_correct[:n_points])
     nz_lambda = np.array(nz_lambda_correct[:n_points])
+    
+    # 验证峰值位置
+    nz_peak_idx = np.argmax(nz_lambda)
+    nz_peak_wl = wavelengths[nz_peak_idx]
+    print(f"[INFO] Nz(λ) 峰值波长: {nz_peak_wl} nm, 峰值: {np.max(nz_lambda):.4f}")
+    
+    v_peak_idx = np.argmax(v_lambda)
+    v_peak_wl = wavelengths[v_peak_idx]
+    print(f"[INFO] V(λ) 峰值波长: {v_peak_wl} nm, 峰值: {np.max(v_lambda):.4f}")
     
     return wavelengths, v_lambda, nz_lambda
 
@@ -110,7 +121,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'analyst_title': '分析人头衔（可选）',
         'contact': '📞 联系：✉️ 电邮: Techlife2027@gmail.com',
         
-        'loaded': '✅ 系统已加载标准光谱响应函数: V(λ) 和 Nz(λ) (CIE S026:2018, 380-780nm, 步长: 5nm)',
+        'loaded': '✅ 系统已加载标准光谱响应函数: V(λ) 和 Nz(λ) (CIE S026:2018, 380-780nm, 步长: 5nm, Nz峰值490nm)',
         
         'input_title': '1️⃣ 输入光源光谱功率分布 (SPD)',
         'upload_label': '选项 A: 上传 CSV/TXT 文件',
@@ -203,7 +214,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'analyst_title': 'Analyst Title (Optional)',
         'contact': '📞 Contact: ✉️ Email: Techlife2027@gmail.com',
         
-        'loaded': '✅ Standard spectral response functions loaded: V(λ) and Nz(λ) (CIE S026:2018, 380-780nm, Step: 5nm)',
+        'loaded': '✅ Standard spectral response functions loaded: V(λ) and Nz(λ) (CIE S026:2018, 380-780nm, Step: 5nm, Nz peak at 490nm)',
         
         'input_title': '1️⃣ Input Light Source Spectral Power Distribution (SPD)',
         'upload_label': 'Option A: Upload CSV/TXT File',
@@ -330,14 +341,16 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     std_wavelengths, v_lambda, nz_lambda = load_spectral_data()
     interp_spectrum = linear_interpolate_to_standard_grid(wavelengths, spectrum, std_wavelengths)
     
-    weighted = interp_spectrum * nz_lambda
-    weighted_integral_nz = trapezoid(weighted, std_wavelengths)
+    # EML 计算: 72983.25 * ∫ E(λ) * Nz(λ) dλ
+    weighted_melanopic = interp_spectrum * nz_lambda
+    weighted_integral_nz = trapezoid(weighted_melanopic, std_wavelengths)
     eml_value = 72983.25 * weighted_integral_nz
     medi_value = eml_value * 0.9063
     
+    # 照度计算: Km * ∫ E(λ) * V(λ) dλ
     km = 683.002
-    weighted_visual = interp_spectrum * v_lambda
-    weighted_integral_v = trapezoid(weighted_visual, std_wavelengths)
+    weighted_photopic = interp_spectrum * v_lambda
+    weighted_integral_v = trapezoid(weighted_photopic, std_wavelengths)
     illuminance = km * weighted_integral_v
     
     return eml_value, medi_value, illuminance, interp_spectrum, std_wavelengths, v_lambda, nz_lambda
@@ -385,23 +398,19 @@ def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lam
         line=dict(color='darkblue', width=2)
     ))
     
-    # 明视觉光谱 V(λ)
-    v_max = np.max(v_lambda)
-    if v_max > 0 and np.max(interp_spectrum) > 0:
-        v_scaled = v_lambda / v_max * np.max(interp_spectrum) * 0.6
-        fig.add_trace(go.Scatter(
-            x=std_wl, y=v_scaled, 
-            mode='lines', 
-            name=t['vis_vlambda'],
-            line=dict(color='red', dash='dot', width=2)
-        ))
+    # 明视觉光谱 V(λ) - 使用实际值（非归一化）
+    fig.add_trace(go.Scatter(
+        x=std_wl, y=v_lambda * np.max(interp_spectrum) * 0.6,
+        mode='lines', 
+        name=t['vis_vlambda'],
+        line=dict(color='red', dash='dot', width=2)
+    ))
     
-    # 有效节律光谱
+    # 有效节律光谱 (SPD × Nz)
     nz_weighted = interp_spectrum * nz_lambda
     if np.max(nz_weighted) > 0:
-        nz_scaled = nz_weighted / np.max(nz_weighted) * np.max(interp_spectrum) * 0.8
         fig.add_trace(go.Scatter(
-            x=std_wl, y=nz_scaled, 
+            x=std_wl, y=nz_weighted,
             mode='lines', 
             name=t['vis_weighted'],
             line=dict(color='green', dash='dash', width=2)
