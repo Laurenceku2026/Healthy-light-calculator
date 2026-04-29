@@ -5,6 +5,35 @@ import plotly.graph_objects as go
 from io import StringIO
 import re
 
+# ==================== 自定义梯形积分函数（兼容所有 NumPy 版本）====================
+def trapezoid(y, x):
+    """
+    手动实现梯形积分，避免 NumPy 版本兼容性问题
+    使用公式: ∫ y dx ≈ Σ (x[i+1] - x[i]) * (y[i] + y[i+1]) / 2
+    """
+    y = np.asarray(y)
+    x = np.asarray(x)
+    
+    if len(y) != len(x):
+        raise ValueError("y and x must have the same length")
+    
+    if len(y) < 2:
+        return 0.0
+    
+    # 计算梯形积分
+    dx = np.diff(x)
+    if np.any(dx <= 0):
+        # 如果 x 不是严格递增，先排序
+        idx = np.argsort(x)
+        x = x[idx]
+        y = y[idx]
+        dx = np.diff(x)
+    
+    # 梯形公式: (y[i] + y[i+1]) / 2 * dx
+    integral = np.sum((y[:-1] + y[1:]) / 2 * dx)
+    return integral
+
+
 # ==================== 多语言文本配置 ====================
 
 LANGUAGES = {
@@ -302,8 +331,9 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     interp_spectrum = linear_interpolate_to_standard_grid(wavelengths, spectrum, std_wavelengths)
     
     # 使用简化公式: EML = 72983.25 * ∫ E(λ) * Nz(λ) dλ
+    # 使用自定义梯形积分函数（兼容所有 NumPy 版本）
     weighted = interp_spectrum * nz_lambda
-    weighted_integral_nz = np.trapz(weighted, std_wavelengths)
+    weighted_integral_nz = trapezoid(weighted, std_wavelengths)
     eml_constant = 72983.25
     eml_value = eml_constant * weighted_integral_nz
     
@@ -313,7 +343,7 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     # 视觉照度 E_v = Km * ∫ E(λ) * V(λ) dλ
     km = 683.002
     weighted_visual = interp_spectrum * v_lambda
-    weighted_integral_v = np.trapz(weighted_visual, std_wavelengths)
+    weighted_integral_v = trapezoid(weighted_visual, std_wavelengths)
     illuminance = km * weighted_integral_v
     
     return eml_value, medi_value, illuminance, interp_spectrum, std_wavelengths, v_lambda, nz_lambda
@@ -344,33 +374,19 @@ def main():
     lang = st.session_state.lang
     t = LANGUAGES[lang]
     
-    # ==================== 自定义CSS（红底白字按钮 - 更强选择器）====================
+    # ==================== 自定义CSS（仅语言按钮红底白字）====================
     st.markdown("""
     <style>
-    /* 方法1：通过data-testid定位按钮容器 */
-    button[data-testid="baseButton-secondary"] {
+    /* 只针对语言按钮（通过 key 精确选择） */
+    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("中文")),
+    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("English")) {
         background-color: #dc2626 !important;
         color: white !important;
         font-weight: bold !important;
         border: none !important;
     }
-    button[data-testid="baseButton-secondary"]:hover {
-        background-color: #b91c1c !important;
-        color: white !important;
-    }
-    /* 方法2：通过key属性选择 */
-    button[kind="secondary"] {
-        background-color: #dc2626 !important;
-        color: white !important;
-    }
-    /* 方法3：全局样式，直接设置语言按钮区域 */
-    .stButton button {
-        background-color: #dc2626 !important;
-        color: white !important;
-        font-weight: bold !important;
-        border: none !important;
-    }
-    .stButton button:hover {
+    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("中文")):hover,
+    button[data-testid="baseButton-secondary"][kind="secondary"]:has(div:contains("English")):hover {
         background-color: #b91c1c !important;
         color: white !important;
     }
@@ -383,7 +399,9 @@ def main():
     with title_col:
         st.title("💡 " + t['page_title'])
     
+    # 使用单独的容器和自定义 HTML 包装语言按钮，确保样式独立
     with lang_col1:
+        # 使用 st.button 但通过 CSS 类名精确控制
         if st.button("中文", key="lang_zh_top", use_container_width=True):
             st.session_state.lang = "zh"
             st.rerun()
@@ -393,9 +411,31 @@ def main():
             st.session_state.lang = "en"
             st.rerun()
     
+    # 额外 CSS：精确控制特定 key 的按钮
+    st.markdown("""
+    <style>
+    /* 精确选择器：只针对 key 为 lang_zh_top 和 lang_en_top 的按钮 */
+    button[key="lang_zh_top"], button[key="lang_en_top"] {
+        background-color: #dc2626 !important;
+        color: white !important;
+        font-weight: bold !important;
+        border: none !important;
+    }
+    button[key="lang_zh_top"]:hover, button[key="lang_en_top"]:hover {
+        background-color: #b91c1c !important;
+        color: white !important;
+    }
+    /* 确保其他按钮不受影响 - 重置其他按钮样式 */
+    button:not([key="lang_zh_top"]):not([key="lang_en_top"]) {
+        background-color: transparent !important;
+        color: inherit !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.markdown(t['page_subtitle'])
     
-    # ==================== 左侧边栏（新顺序）====================
+    # ==================== 左侧边栏 ====================
     with st.sidebar:
         # 1. 关于系统（最上面作为标题）
         st.header(t['about_system'])
@@ -559,12 +599,4 @@ def main():
                     mime='text/csv'
                 )
         else:
-            st.error(t['error_parse'])
-    
-    # 页脚
-    st.divider()
-    st.caption(t['footer'])
-
-
-if __name__ == "__main__":
-    main()
+            st
