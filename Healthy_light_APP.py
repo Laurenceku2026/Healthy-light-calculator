@@ -30,6 +30,53 @@ def trapezoid(y, x):
     return integral
 
 
+# ==================== 正确的光谱响应函数数据 ====================
+# 数据来源: CIE S026:2018, Enezi et al 2011
+# 波长范围: 380-780nm, 步长 5nm
+# V(λ) 是经过晶状体透射率修正的（32岁标准观察者，未散瞳）
+
+def load_spectral_data():
+    """加载正确的明视觉 V(λ) 和黑视素 Nz(λ) 数据
+    数据来源: CIE S026:2018 / Enezi et al 2011
+    """
+    wavelengths = np.arange(380, 785, 5)
+    
+    # ========== 正确的 V(λ) 数据 (CIE S026 明视觉标准，经过晶状体透射率修正) ==========
+    # 基于您附件的 Excel 数据 (第 H 列)
+    v_lambda_correct = [
+        0.000039, 0.000064, 0.000120, 0.000217, 0.000396, 0.000640, 0.001210, 0.002180, 0.004000, 0.007300,
+        0.011600, 0.016840, 0.023000, 0.029800, 0.038000, 0.048000, 0.060000, 0.073900, 0.090980, 0.112600,
+        0.139020, 0.169300, 0.208020, 0.258600, 0.323000, 0.407300, 0.503000, 0.608200, 0.710000, 0.793200,
+        0.862000, 0.914850, 0.954000, 0.980300, 0.994950, 1.000000, 0.995000, 0.978600, 0.952000, 0.915400,
+        0.870000, 0.816300, 0.757000, 0.694900, 0.631000, 0.566800, 0.503000, 0.441200, 0.381000, 0.321000,
+        0.265000, 0.217000, 0.175000, 0.138200, 0.107000, 0.081600, 0.061000, 0.044580, 0.032000, 0.023200,
+        0.017000, 0.011920, 0.008210, 0.005723, 0.004102, 0.002929, 0.002091, 0.001484, 0.001047, 0.000740,
+        0.000520, 0.000361, 0.000249, 0.000172, 0.000120, 0.000085, 0.000060, 0.000042, 0.000030, 0.000021,
+        0.000015
+    ]
+    
+    # ========== 正确的 Nz(λ) 黑视素数据 (Enezi et al 2011 / CIE S026) ==========
+    # 峰值位于 480-490nm，基于您附件的 Excel 数据 (第 F 列 melanopic)
+    nz_lambda_correct = [
+        0.00001047, 0.00001902, 0.00003529, 0.00006707, 0.00013034, 0.00026017, 0.00052642, 0.00090647, 0.00156526, 0.00213393,
+        0.00289546, 0.00365751, 0.00458030, 0.00540623, 0.00631540, 0.00718152, 0.00807565, 0.00895578, 0.00981205, 0.01046721,
+        0.01101321, 0.01129853, 0.01140550, 0.01131451, 0.01101716, 0.01051928, 0.00984167, 0.00895598, 0.00797961, 0.00695076,
+        0.00592298, 0.00493326, 0.00401140, 0.00318368, 0.00246042, 0.00184833, 0.00135184, 0.00096201, 0.00066952, 0.00045632,
+        0.00030652, 0.00020373, 0.00013447, 0.00008821, 0.00005779, 0.00003784, 0.00002483, 0.00001635, 0.00001080, 0.00000716,
+        0.00000477, 0.00000319, 0.00000215, 0.00000145, 0.00000099, 0.00000068, 0.00000046, 0.00000032, 0.00000022, 0.00000016,
+        0.00000011, 0.00000008, 0.00000005, 0.00000004, 0.00000003, 0.00000002, 0.00000001, 0.00000001, 0.00000001, 0.00000001,
+        0.00000001, 0.00000001, 0.00000001, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000, 0.00000000,
+        0.00000000
+    ]
+    
+    # 确保数据长度一致 (380-780nm, 每5nm, 共81个点)
+    n_points = len(wavelengths)
+    v_lambda = np.array(v_lambda_correct[:n_points])
+    nz_lambda = np.array(nz_lambda_correct[:n_points])
+    
+    return wavelengths, v_lambda, nz_lambda
+
+
 # ==================== 多语言文本配置 ====================
 
 LANGUAGES = {
@@ -63,7 +110,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'analyst_title': '分析人头衔（可选）',
         'contact': '📞 联系：✉️ 电邮: Techlife2027@gmail.com',
         
-        'loaded': '✅ 系统已加载标准光谱响应函数: V(λ) 和 Nz(λ) (波长范围: 380-780nm, 步长: 5nm)',
+        'loaded': '✅ 系统已加载标准光谱响应函数: V(λ) 和 Nz(λ) (CIE S026:2018, 380-780nm, 步长: 5nm)',
         
         'input_title': '1️⃣ 输入光源光谱功率分布 (SPD)',
         'upload_label': '选项 A: 上传 CSV/TXT 文件',
@@ -82,7 +129,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'well_comparison_title': '📋 与 WELL 标准对比',
         'well_table_header': 'WELL 等级',
         'well_eml_requirement': 'EML 要求',
-        'well_medi_requirement': 'm-EDI 要求',
         'well_status': '当前状态',
         'well_excellent': '高品质推荐',
         'well_basis_a': '基础达标 (方案A)',
@@ -98,7 +144,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'vis_title': '📈 光谱可视化',
         'vis_original': '原始数据 (步长{:.1f}nm)',
         'vis_interp': '插值后光谱 (5nm步长)',
-        'vis_vlambda': '明视觉光谱 V(λ)',
+        'vis_vlambda': '明视觉光谱 V(λ) (CIE S026)',
         'vis_weighted': '有效节律光谱 (SPD × Nz)',
         
         'data_note_title': '🔧 数据处理说明',
@@ -110,7 +156,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'error_parse': '光谱数据解析失败，请检查格式。',
         'error_no_overlap': '错误：输入的光谱波长范围与标准范围 (380-780nm) 没有重叠。',
         
-        'footer': '⚠️ 免责声明: 本工具计算结果基于内置光谱响应函数与用户输入。',
+        'footer': '⚠️ 免责声明: 本工具基于 CIE S026:2018 标准计算。',
         
         'detected': '📊 检测到输入数据: 波长范围 {:.0f} - {:.0f} nm，平均步长 {:.2f} nm，数据点数量: {}',
         
@@ -157,7 +203,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'analyst_title': 'Analyst Title (Optional)',
         'contact': '📞 Contact: ✉️ Email: Techlife2027@gmail.com',
         
-        'loaded': '✅ Standard spectral response functions loaded: V(λ) and Nz(λ) (Range: 380-780nm, Step: 5nm)',
+        'loaded': '✅ Standard spectral response functions loaded: V(λ) and Nz(λ) (CIE S026:2018, 380-780nm, Step: 5nm)',
         
         'input_title': '1️⃣ Input Light Source Spectral Power Distribution (SPD)',
         'upload_label': 'Option A: Upload CSV/TXT File',
@@ -176,7 +222,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'well_comparison_title': '📋 WELL Standard Comparison',
         'well_table_header': 'WELL Level',
         'well_eml_requirement': 'EML Requirement',
-        'well_medi_requirement': 'm-EDI Requirement',
         'well_status': 'Status',
         'well_excellent': 'High Quality',
         'well_basis_a': 'Basic (Option A)',
@@ -192,7 +237,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'vis_title': '📈 Spectral Visualization',
         'vis_original': 'Original Data ({:.1f}nm step)',
         'vis_interp': 'Interpolated Spectrum (5nm step)',
-        'vis_vlambda': 'Photopic Spectrum V(λ)',
+        'vis_vlambda': 'Photopic Spectrum V(λ) (CIE S026)',
         'vis_weighted': 'Effective Circadian Spectrum (SPD × Nz)',
         
         'data_note_title': '🔧 Data Processing Notes',
@@ -204,7 +249,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'error_parse': 'Failed to parse spectral data. Please check format.',
         'error_no_overlap': 'Error: Input wavelength range has no overlap with standard range (380-780nm).',
         
-        'footer': '⚠️ Disclaimer: This tool is based on built-in spectral response functions and user input.',
+        'footer': '⚠️ Disclaimer: This tool is based on CIE S026:2018 standard.',
         
         'detected': '📊 Detected input: wavelength range {:.0f} - {:.0f} nm, average step {:.2f} nm, data points: {}',
         
@@ -224,47 +269,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 }
 
 
-# ==================== 核心功能函数 ====================
-
-def load_spectral_data():
-    wavelengths = np.arange(380, 785, 5)
-    
-    v_lambda_raw = [0.0000, 0.0000, 0.0000, 0.0001, 0.0002, 0.0004, 0.0006, 0.0010, 0.0017, 0.0026,
-                    0.0040, 0.0060, 0.0090, 0.0130, 0.0180, 0.0250, 0.0340, 0.0450, 0.0590, 0.0760,
-                    0.0960, 0.1210, 0.1500, 0.1840, 0.2220, 0.2650, 0.3120, 0.3630, 0.4170, 0.4740,
-                    0.5280, 0.5810, 0.6310, 0.6790, 0.7240, 0.7660, 0.8050, 0.8400, 0.8710, 0.8990,
-                    0.9240, 0.9450, 0.9620, 0.9750, 0.9850, 0.9920, 0.9970, 0.9990, 1.0000, 0.9990,
-                    0.9970, 0.9940, 0.9900, 0.9850, 0.9790, 0.9720, 0.9640, 0.9550, 0.9450, 0.9340,
-                    0.9220, 0.9090, 0.8950, 0.8800, 0.8650, 0.8490, 0.8320, 0.8150, 0.7970, 0.7790,
-                    0.7600, 0.7410, 0.7220, 0.7030, 0.6840, 0.6650, 0.6460, 0.6280, 0.6100, 0.5920,
-                    0.5750, 0.5580, 0.5420, 0.5270, 0.5120, 0.4980, 0.4840, 0.4700, 0.4570, 0.4450,
-                    0.4330, 0.4210, 0.4100, 0.3990, 0.3880, 0.3780, 0.3680, 0.3580, 0.3480, 0.3390,
-                    0.3300, 0.3210, 0.3130, 0.3050, 0.2970, 0.2890, 0.2820, 0.2750, 0.2680, 0.2610,
-                    0.2550, 0.2490, 0.2430, 0.2370, 0.2310, 0.2260, 0.2210, 0.2160, 0.2110, 0.2060,
-                    0.2010, 0.1970, 0.1920, 0.1880, 0.1840, 0.1800, 0.1760, 0.1720, 0.1680, 0.1640,
-                    0.1600, 0.1570, 0.1540, 0.1510, 0.1480, 0.1450, 0.1420, 0.1390, 0.1360, 0.1330,
-                    0.1300, 0.1260, 0.1220, 0.1180, 0.1140, 0.1100, 0.1060, 0.1020, 0.0980, 0.0940,
-                    0.0900, 0.0860, 0.0820, 0.0780, 0.0740, 0.0700, 0.0660, 0.0620, 0.0580, 0.0540,
-                    0.0500, 0.0460, 0.0420, 0.0380, 0.0340, 0.0300, 0.0260, 0.0220, 0.0180, 0.0140,
-                    0.0100, 0.0070, 0.0040, 0.0020, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
-                    0.0000, 0.0000, 0.0000, 0.0000, 0.0000]
-    
-    nz_lambda_raw = [0.0000, 0.0001, 0.0002, 0.0004, 0.0008, 0.0014, 0.0023, 0.0037, 0.0059, 0.0091,
-                     0.0139, 0.0209, 0.0308, 0.0445, 0.0632, 0.0882, 0.1207, 0.1620, 0.2131, 0.2749,
-                     0.3476, 0.4310, 0.5245, 0.6269, 0.7357, 0.8476, 0.9531, 1.0000, 0.9955, 0.9482,
-                     0.8676, 0.7632, 0.6512, 0.5396, 0.4350, 0.3420, 0.2630, 0.1980, 0.1465, 0.1068,
-                     0.0769, 0.0548, 0.0387, 0.0271, 0.0189, 0.0131, 0.0090, 0.0062, 0.0042, 0.0029,
-                     0.0020, 0.0014, 0.0010, 0.0007, 0.0005, 0.0003, 0.0002, 0.0001, 0.0001, 0.0001,
-                     0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0001, 0.0000, 0.0000,
-                     0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000,
-                     0.0000, 0.0000]
-    
-    min_len = len(wavelengths)
-    v_lambda = np.array(v_lambda_raw[:min_len])
-    nz_lambda = np.array(nz_lambda_raw[:min_len])
-    
-    return wavelengths, v_lambda, nz_lambda
-
+# ==================== 其他核心函数 ====================
 
 def detect_wavelength_step(wavelengths):
     if len(wavelengths) < 2:
@@ -362,7 +367,6 @@ def get_well_comparison(eml):
 
 
 def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lambda, nz_lambda, step, t):
-    """创建光谱可视化图表"""
     fig = go.Figure()
     
     # 原始数据点
@@ -381,7 +385,7 @@ def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lam
         line=dict(color='darkblue', width=2)
     ))
     
-    # 明视觉光谱
+    # 明视觉光谱 V(λ)
     v_max = np.max(v_lambda)
     if v_max > 0 and np.max(interp_spectrum) > 0:
         v_scaled = v_lambda / v_max * np.max(interp_spectrum) * 0.6
@@ -392,7 +396,7 @@ def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lam
             line=dict(color='red', dash='dot', width=2)
         ))
     
-    # 节律光谱
+    # 有效节律光谱
     nz_weighted = interp_spectrum * nz_lambda
     if np.max(nz_weighted) > 0:
         nz_scaled = nz_weighted / np.max(nz_weighted) * np.max(interp_spectrum) * 0.8
@@ -418,8 +422,8 @@ def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lam
 
 
 def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux, 
-                         well_results, fig, input_min, input_max, step, num_points):
-    """生成 Word 报告，使用 HTML 嵌入图表"""
+                         well_results, fig_html, input_min, input_max, step, num_points):
+    """生成 Word 报告"""
     
     # 获取健康评级
     if eml >= 250:
@@ -451,14 +455,12 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
     
     current_date = datetime.now().strftime('%Y-%m-%d')
     
-    # 将图表转换为 HTML 嵌入
-    fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
-    
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>{t['report_title']}</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         body {{
             font-family: 'Arial', '宋体', sans-serif;
@@ -642,7 +644,7 @@ def main():
     lang = st.session_state.lang
     t = LANGUAGES[lang]
     
-    # CSS - 语言按钮红底白字，英文标题不分行
+    # CSS
     st.markdown("""
     <style>
     button[key="lang_zh_top"], button[key="lang_en_top"] {
@@ -658,7 +660,6 @@ def main():
         background-color: transparent !important;
         color: inherit !important;
     }
-    /* 确保英文标题不分行 */
     .stTitle {
         white-space: nowrap !important;
     }
@@ -738,11 +739,13 @@ def main():
                 eml, medi, lux, interp_spectrum, std_wl, v_data, nz_data = calculate_eml_and_medi(wl_input, power_input)
                 well_results = get_well_comparison(eml)
                 fig = create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_data, nz_data, step, t)
+                fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
                 
                 st.session_state.calc_data = {
                     'eml': eml, 'medi': medi, 'lux': lux,
                     'well_results': well_results,
                     'fig': fig,
+                    'fig_html': fig_html,
                     'input_min': input_min, 'input_max': input_max,
                     'step': step, 'num_points': len(wl_input),
                     'analyst_name': analyst_name, 'analyst_title': analyst_title
@@ -788,7 +791,7 @@ def main():
                 
                 report_data = generate_word_report(
                     t, analyst_name, analyst_title, eml, medi, lux, 
-                    well_results, fig, input_min, input_max, step, len(wl_input)
+                    well_results, fig_html, input_min, input_max, step, len(wl_input)
                 )
                 st.download_button(
                     label=t['export_btn'],
@@ -838,7 +841,7 @@ def main():
         report_data = generate_word_report(
             t, data.get('analyst_name', analyst_name), data.get('analyst_title', analyst_title),
             data['eml'], data['medi'], data['lux'], 
-            data['well_results'], data['fig'], data['input_min'], data['input_max'], 
+            data['well_results'], data['fig_html'], data['input_min'], data['input_max'], 
             data['step'], data['num_points']
         )
         st.download_button(
