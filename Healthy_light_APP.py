@@ -86,6 +86,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         
         'warning_input': '请先上传文件或输入数据。',
         'error_parse': '光谱数据解析失败，请检查格式。需要两列：波长(nm) 和 功率(W/m²/nm)',
+        'error_no_overlap': '错误：输入的光谱波长范围与标准范围 (380-780nm) 没有重叠，无法计算。',
         
         'footer': '⚠️ 免责声明: 本工具计算结果基于内置光谱响应函数与用户输入。不构成专业医疗或照明认证建议。',
         
@@ -172,6 +173,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         
         'warning_input': 'Please upload a file or enter data first.',
         'error_parse': 'Failed to parse spectral data. Please check format. Need two columns: Wavelength(nm) and Power(W/m²/nm)',
+        'error_no_overlap': 'Error: Input wavelength range has no overlap with standard range (380-780nm). Cannot calculate.',
         
         'footer': '⚠️ Disclaimer: This tool is based on built-in spectral response functions and user input. Not for professional medical or lighting certification advice.',
         
@@ -237,9 +239,7 @@ def detect_wavelength_step(wavelengths):
 
 
 def parse_spectrum_flexible(text):
-    """
-    灵活解析光谱数据 - 支持任意分隔符（空格、逗号、制表符等）
-    """
+    """灵活解析光谱数据 - 支持任意分隔符（空格、逗号、制表符等）"""
     try:
         lines = text.strip().split('\n')
         wavelengths = []
@@ -250,7 +250,6 @@ def parse_spectrum_flexible(text):
             if not line or line.startswith('#') or line.startswith('//'):
                 continue
             
-            # 使用正则表达式分割：支持空格、逗号、制表符
             parts = re.split(r'[,\s\t]+', line)
             parts = [p for p in parts if p]
             
@@ -303,9 +302,7 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     interp_spectrum = linear_interpolate_to_standard_grid(wavelengths, spectrum, std_wavelengths)
     
     # 使用简化公式: EML = 72983.25 * ∫ E(λ) * Nz(λ) dλ
-    # 修复：使用 scipy.integrate 或手动计算梯形积分来避免版本兼容问题
     weighted = interp_spectrum * nz_lambda
-    # 手动计算梯形积分（兼容所有 NumPy 版本）
     weighted_integral_nz = np.trapz(weighted, std_wavelengths)
     eml_constant = 72983.25
     eml_value = eml_constant * weighted_integral_nz
@@ -322,6 +319,17 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     return eml_value, medi_value, illuminance, interp_spectrum, std_wavelengths, v_lambda, nz_lambda
 
 
+def check_wavelength_overlap(wavelengths):
+    """检查输入波长与标准范围是否有重叠"""
+    std_min, std_max = 380, 780
+    input_min, input_max = np.min(wavelengths), np.max(wavelengths)
+    
+    # 检查是否有重叠
+    if input_max < std_min or input_min > std_max:
+        return False, None, None
+    return True, input_min, input_max
+
+
 # ==================== Streamlit UI ====================
 
 def main():
@@ -336,30 +344,33 @@ def main():
     lang = st.session_state.lang
     t = LANGUAGES[lang]
     
-    # ==================== 自定义CSS（红底白字按钮）====================
+    # ==================== 自定义CSS（红底白字按钮 - 更强选择器）====================
     st.markdown("""
     <style>
-    /* 右上角语言按钮样式 - 使用更精确的选择器 */
-    [data-testid="column"]:nth-of-type(2) button,
-    [data-testid="column"]:nth-of-type(3) button {
+    /* 方法1：通过data-testid定位按钮容器 */
+    button[data-testid="baseButton-secondary"] {
         background-color: #dc2626 !important;
         color: white !important;
         font-weight: bold !important;
         border: none !important;
     }
-    [data-testid="column"]:nth-of-type(2) button:hover,
-    [data-testid="column"]:nth-of-type(3) button:hover {
+    button[data-testid="baseButton-secondary"]:hover {
         background-color: #b91c1c !important;
         color: white !important;
     }
-    /* 备用方案：通过 key 属性选择 */
-    button[key="lang_zh_top"], button[key="lang_en_top"] {
+    /* 方法2：通过key属性选择 */
+    button[kind="secondary"] {
+        background-color: #dc2626 !important;
+        color: white !important;
+    }
+    /* 方法3：全局样式，直接设置语言按钮区域 */
+    .stButton button {
         background-color: #dc2626 !important;
         color: white !important;
         font-weight: bold !important;
         border: none !important;
     }
-    button[key="lang_zh_top"]:hover, button[key="lang_en_top"]:hover {
+    .stButton button:hover {
         background-color: #b91c1c !important;
         color: white !important;
     }
@@ -384,18 +395,10 @@ def main():
     
     st.markdown(t['page_subtitle'])
     
-    # ==================== 左侧边栏 ====================
+    # ==================== 左侧边栏（新顺序）====================
     with st.sidebar:
-        st.markdown("---")
-        
-        # 背景知识与计算公式
-        with st.expander(t['theory_title'], expanded=True):
-            st.markdown(t['theory_content'])
-        
-        st.markdown("---")
-        
-        # 关于系统
-        st.subheader(t['about_system'])
+        # 1. 关于系统（最上面作为标题）
+        st.header(t['about_system'])
         
         # 分析人姓名输入
         analyst_name = st.text_input(
@@ -411,10 +414,15 @@ def main():
             key="analyst_title"
         )
         
-        st.markdown("---")
-        
         # 联系信息
         st.markdown(t['contact'])
+        
+        # 分隔线
+        st.markdown("---")
+        
+        # 2. 背景知识与计算公式（折叠）
+        with st.expander(t['theory_title'], expanded=False):
+            st.markdown(t['theory_content'])
         
         # 显示分析人信息（如果已输入）
         if analyst_name:
@@ -455,95 +463,101 @@ def main():
             st.warning(t['warning_input'])
         
         if wl_input is not None and power_input is not None and len(wl_input) >= 2:
-            # 检测输入数据的步长
-            step = detect_wavelength_step(wl_input)
-            st.info(t['detected'].format(wl_input[0], wl_input[-1], step, len(wl_input)))
+            # 检查波长范围是否有重叠
+            has_overlap, input_min, input_max = check_wavelength_overlap(wl_input)
             
-            # 核心计算
-            eml, medi, lux, interp_spectrum, std_wl, v_data, nz_data = calculate_eml_and_medi(wl_input, power_input)
-            
-            # 显示结果
-            st.subheader(t['result_title'])
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(t['eml_label'], f"{eml:.1f} lx")
-            with col2:
-                st.metric(t['medi_label'], f"{medi:.1f} lx", delta=t['medi_delta'])
-            with col3:
-                st.metric(t['lux_label'], f"{lux:.1f} lx")
-            
-            # 健康评级
-            if eml >= 250:
-                st.success(t['rating_excellent'].format(eml))
-            elif eml >= 150:
-                st.info(t['rating_good'].format(eml))
-            elif eml <= 50:
-                st.info(t['rating_night'].format(eml))
+            if not has_overlap:
+                st.error(t['error_no_overlap'])
             else:
-                st.warning(t['rating_moderate'].format(eml))
-            
-            # 绘图
-            st.subheader(t['vis_title'])
-            
-            fig = go.Figure()
-            
-            # 原始数据点（散点）
-            fig.add_trace(go.Scatter(
-                x=wl_input, y=power_input, 
-                mode='markers', 
-                name=t['vis_original'].format(step),
-                marker=dict(color='orange', size=8, symbol='circle')
-            ))
-            
-            # 插值后的光谱（连线）
-            fig.add_trace(go.Scatter(
-                x=std_wl, y=interp_spectrum, 
-                mode='lines', 
-                name=t['vis_interp'],
-                line=dict(color='darkblue', width=2)
-            ))
-            
-            # 有效节律光谱
-            nz_weighted = interp_spectrum * nz_data
-            if np.max(nz_weighted) > 0:
-                nz_scaled = nz_weighted / np.max(nz_weighted) * np.max(interp_spectrum) * 0.8
+                # 检测输入数据的步长
+                step = detect_wavelength_step(wl_input)
+                st.info(t['detected'].format(input_min, input_max, step, len(wl_input)))
+                
+                # 核心计算
+                eml, medi, lux, interp_spectrum, std_wl, v_data, nz_data = calculate_eml_and_medi(wl_input, power_input)
+                
+                # 显示结果
+                st.subheader(t['result_title'])
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(t['eml_label'], f"{eml:.1f} lx")
+                with col2:
+                    st.metric(t['medi_label'], f"{medi:.1f} lx", delta=t['medi_delta'])
+                with col3:
+                    st.metric(t['lux_label'], f"{lux:.1f} lx")
+                
+                # 健康评级
+                if eml >= 250:
+                    st.success(t['rating_excellent'].format(eml))
+                elif eml >= 150:
+                    st.info(t['rating_good'].format(eml))
+                elif eml <= 50:
+                    st.info(t['rating_night'].format(eml))
+                else:
+                    st.warning(t['rating_moderate'].format(eml))
+                
+                # 绘图
+                st.subheader(t['vis_title'])
+                
+                fig = go.Figure()
+                
+                # 原始数据点（散点）
                 fig.add_trace(go.Scatter(
-                    x=std_wl, y=nz_scaled, 
+                    x=wl_input, y=power_input, 
+                    mode='markers', 
+                    name=t['vis_original'].format(step),
+                    marker=dict(color='orange', size=8, symbol='circle')
+                ))
+                
+                # 插值后的光谱（连线）
+                fig.add_trace(go.Scatter(
+                    x=std_wl, y=interp_spectrum, 
                     mode='lines', 
-                    name=t['vis_weighted'],
-                    line=dict(color='green', dash='dash', width=2)
+                    name=t['vis_interp'],
+                    line=dict(color='darkblue', width=2)
                 ))
-            
-            fig.update_layout(
-                title="Spectral Power Distribution (SPD)",
-                xaxis_title="Wavelength (nm)",
-                yaxis_title="Power (W/m²/nm)",
-                legend_title="Spectrum Type",
-                template="plotly_white",
-                hovermode='x unified'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # 数据处理说明
-            with st.expander(t['data_note_title']):
-                st.markdown(t['data_note_content'].format(
-                    len(wl_input), wl_input[0], wl_input[-1], step, len(std_wl)
-                ))
-            
-            # 导出按钮
-            export_df = pd.DataFrame({
-                'Wavelength_nm': std_wl, 
-                'Interpolated_Spectrum_W_m2_nm': interp_spectrum,
-                'V_lambda': v_data,
-                'Nz_lambda': nz_data,
-                'Circadian_Spectrum_SPDxNz': interp_spectrum * nz_data
-            })
-            st.download_button(
-                label=t['export_btn'],
-                data=export_df.to_csv(index=False),
-                file_name='eml_calculation_result.csv',
-                mime='text/csv'
-            )
+                
+                # 有效节律光谱
+                nz_weighted = interp_spectrum * nz_data
+                if np.max(nz_weighted) > 0:
+                    nz_scaled = nz_weighted / np.max(nz_weighted) * np.max(interp_spectrum) * 0.8
+                    fig.add_trace(go.Scatter(
+                        x=std_wl, y=nz_scaled, 
+                        mode='lines', 
+                        name=t['vis_weighted'],
+                        line=dict(color='green', dash='dash', width=2)
+                    ))
+                
+                fig.update_layout(
+                    title="Spectral Power Distribution (SPD)",
+                    xaxis_title="Wavelength (nm)",
+                    yaxis_title="Power (W/m²/nm)",
+                    legend_title="Spectrum Type",
+                    template="plotly_white",
+                    hovermode='x unified'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 数据处理说明
+                with st.expander(t['data_note_title']):
+                    st.markdown(t['data_note_content'].format(
+                        len(wl_input), input_min, input_max, step, len(std_wl)
+                    ))
+                
+                # 导出按钮
+                export_df = pd.DataFrame({
+                    'Wavelength_nm': std_wl, 
+                    'Interpolated_Spectrum_W_m2_nm': interp_spectrum,
+                    'V_lambda': v_data,
+                    'Nz_lambda': nz_data,
+                    'Circadian_Spectrum_SPDxNz': interp_spectrum * nz_data
+                })
+                st.download_button(
+                    label=t['export_btn'],
+                    data=export_df.to_csv(index=False),
+                    file_name='eml_calculation_result.csv',
+                    mime='text/csv'
+                )
         else:
             st.error(t['error_parse'])
     
