@@ -9,11 +9,9 @@ import re
 
 LANGUAGES = {
     'zh': {
-        # 页面标题
         'page_title': '健康光计算器 (EML / m-EDI)',
         'page_subtitle': '基于 CIE S026 / WELL 标准 — 计算等值黑视素照度 (EML) 和黑视素等效日光照度 (m-EDI)',
         
-        # 背景知识
         'theory_title': '📖 背景知识与计算公式',
         'theory_content': '''
 ### 什么是 EML 和 m-EDI？
@@ -45,46 +43,33 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **夜间 (家居/睡眠)**：EML ≤ 50（有助于褪黑素分泌，助眠）
         ''',
         
-        # 状态提示
         'loaded': '✅ 系统已加载标准光谱响应函数: V(λ) 和 Nz(λ) (波长范围: 380-780nm, 步长: 5nm)',
         
-        # 输入区域
         'input_title': '1️⃣ 输入光源光谱功率分布 (SPD)',
         'upload_label': '选项 A: 上传 CSV/TXT 文件',
         'upload_help': '文件应包含两列: 波长(nm), 功率(W/m²/nm)。支持任意步长 (1nm,5nm,10nm等)',
         'textarea_label': '选项 B: 粘贴或输入光谱数据',
-        'textarea_placeholder': '''支持多种格式，例如：
-380 0.0012
-385 0.0021
-390 0.0035
-
-或 CSV 格式：
-380,0.0012
-385,0.0021
-390,0.0035''',
+        'textarea_placeholder': '波长(nm),功率(W/m²/nm)\n380 0.0012\n385 0.0021\n390 0.0035',
+        'unit_note': '💡 单位说明：功率单位为 **W/m²/nm** (瓦每平方米每纳米)，这是 EML 计算的标准单位',
         'example_btn': '📋 加载示例数据 (5nm步长)',
         'calc_btn': '🚀 计算 EML / m-EDI',
         
-        # 计算结果
         'result_title': '📊 计算结果',
         'eml_label': '等值黑视素照度 (EML)',
         'medi_label': '黑视素等效日光照度 (m-EDI)',
         'lux_label': '视觉照度 (Illuminance)',
         'medi_delta': '≈ EML x 0.9063',
         
-        # 健康评级
         'rating_excellent': '⭐ **日间健康评级：优秀** (EML {:.0f} ≥ 250) — 有助于提升日间警觉性与工作效率',
         'rating_good': '🌤️ **日间健康评级：基础达标** (EML {:.0f} ≥ 150) — 满足 WELL 基础要求',
         'rating_night': '🌙 **夜间模式识别** (EML {:.0f} ≤ 50) — 适合睡前照明环境',
         'rating_moderate': '⚠️ **节律刺激中等** (EML {:.0f}) — 介于日间与夜间之间，需根据使用时间评估',
         
-        # 可视化
         'vis_title': '📈 光谱可视化',
         'vis_original': '原始数据 (步长{:.1f}nm)',
         'vis_interp': '插值后光谱 (5nm步长)',
         'vis_weighted': '有效节律光谱 (SPD × Nz)',
         
-        # 数据处理说明
         'data_note_title': '🔧 数据处理说明',
         'data_note_content': '''
 - **原始数据**: {} 个数据点，波长范围 {:.0f} - {:.0f} nm，平均步长 {:.2f} nm
@@ -93,17 +78,13 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **边界处理**: 超出 380-780nm 范围的数据自动补 0
         ''',
         
-        # 导出
         'export_btn': '📥 导出计算结果 (CSV)',
         
-        # 错误提示
         'warning_input': '请先上传文件或输入数据。',
         'error_parse': '光谱数据解析失败，请检查格式。需要两列：波长(nm) 和 功率(W/m²/nm)',
         
-        # 页脚
         'footer': '⚠️ 免责声明: 本工具计算结果基于内置光谱响应函数与用户输入。不构成专业医疗或照明认证建议。',
         
-        # 输入检测
         'detected': '📊 检测到输入数据: 波长范围 {:.0f} - {:.0f} nm，平均步长 {:.2f} nm，数据点数量: {}'
     },
     'en': {
@@ -147,15 +128,8 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'upload_label': 'Option A: Upload CSV/TXT File',
         'upload_help': 'File should contain two columns: Wavelength(nm), Power(W/m²/nm). Supports any step size (1nm,5nm,10nm, etc.)',
         'textarea_label': 'Option B: Paste or Enter Spectral Data',
-        'textarea_placeholder': '''Multiple formats supported, e.g.:
-380 0.0012
-385 0.0021
-390 0.0035
-
-Or CSV format:
-380,0.0012
-385,0.0021
-390,0.0035''',
+        'textarea_placeholder': 'Wavelength(nm),Power(W/m²/nm)\n380 0.0012\n385 0.0021\n390 0.0035',
+        'unit_note': '💡 Unit Note: Power unit is **W/m²/nm** (Watts per square meter per nanometer), the standard unit for EML calculation',
         'example_btn': '📋 Load Example Data (5nm step)',
         'calc_btn': '🚀 Calculate EML / m-EDI',
         
@@ -267,7 +241,6 @@ def parse_spectrum_flexible(text):
                 continue
             
             # 使用正则表达式分割：支持空格、逗号、制表符
-            # 匹配所有数字（包括科学计数法）
             parts = re.split(r'[,\s\t]+', line)
             # 过滤空字符串
             parts = [p for p in parts if p]
@@ -296,8 +269,6 @@ def parse_spectrum_flexible(text):
     except Exception as e:
         return None, None
 
-
-# ==================== 线性插值算法 ====================
 
 def linear_interpolate_to_standard_grid(x_input, y_input, x_standard):
     """
@@ -330,7 +301,7 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     # 加载标准函数 (5nm 步长)
     std_wavelengths, v_lambda, nz_lambda = load_spectral_data()
     
-    # 关键：使用线性插值将用户光谱映射到标准波长网格
+    # 使用线性插值将用户光谱映射到标准波长网格
     interp_spectrum = linear_interpolate_to_standard_grid(wavelengths, spectrum, std_wavelengths)
     
     # 使用简化公式: EML = 72983.25 * ∫ E(λ) * Nz(λ) dλ
@@ -349,23 +320,84 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     return eml_value, medi_value, illuminance, interp_spectrum, std_wavelengths, v_lambda, nz_lambda
 
 
+# ==================== 语言切换按钮样式 ====================
+
+def language_buttons():
+    """返回两个红底白字的语言切换按钮"""
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("中文", key="lang_zh", use_container_width=True):
+            st.session_state.lang = "zh"
+            st.rerun()
+    with col2:
+        if st.button("English", key="lang_en", use_container_width=True):
+            st.session_state.lang = "en"
+            st.rerun()
+
+
 # ==================== Streamlit UI ====================
 
 def main():
     # 页面配置
     st.set_page_config(page_title="健康光计算器 (EML / m-EDI)", layout="wide")
     
-    # 右上角语言切换按钮
-    col_title, col_lang = st.columns([4, 1])
-    with col_lang:
-        lang = st.selectbox("🌐 Language / 语言", ["中文", "English"], index=0)
+    # 初始化语言状态
+    if 'lang' not in st.session_state:
+        st.session_state.lang = "zh"
     
-    # 根据选择获取文本
-    t = LANGUAGES['zh'] if lang == "中文" else LANGUAGES['en']
+    # 获取当前语言
+    lang = st.session_state.lang
+    t = LANGUAGES[lang]
     
-    # 标题
-    with col_title:
+    # 自定义CSS：红底白字按钮
+    st.markdown("""
+    <style>
+    div[data-testid="column"]:has(button[key="lang_zh"]) button,
+    div[data-testid="column"]:has(button[key="lang_en"]) button {
+        background-color: #dc2626 !important;
+        color: white !important;
+        font-weight: bold !important;
+        border: none !important;
+    }
+    div[data-testid="column"]:has(button[key="lang_zh"]) button:hover,
+    div[data-testid="column"]:has(button[key="lang_en"]) button:hover {
+        background-color: #b91c1c !important;
+        color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # 标题行：标题 + 语言按钮
+    title_col, spacer, lang_col1, lang_col2 = st.columns([4, 2, 0.5, 0.5])
+    with title_col:
         st.title("💡 " + t['page_title'])
+    
+    # 语言按钮放在右上角
+    with lang_col1:
+        if st.button("中文", key="lang_zh_top", use_container_width=True):
+            st.session_state.lang = "zh"
+            st.rerun()
+    with lang_col2:
+        if st.button("English", key="lang_en_top", use_container_width=True):
+            st.session_state.lang = "en"
+            st.rerun()
+    
+    # 应用红底白字样式到顶部按钮
+    st.markdown("""
+    <style>
+    button[key="lang_zh_top"], button[key="lang_en_top"] {
+        background-color: #dc2626 !important;
+        color: white !important;
+        font-weight: bold !important;
+        border: none !important;
+    }
+    button[key="lang_zh_top"]:hover, button[key="lang_en_top"]:hover {
+        background-color: #b91c1c !important;
+        color: white !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
     st.markdown(t['page_subtitle'])
     
     # 背景知识（带公式）
@@ -380,7 +412,16 @@ def main():
     st.subheader(t['input_title'])
     
     uploaded_file = st.file_uploader(t['upload_label'], type=["csv", "txt"], help=t['upload_help'])
-    spectrum_text = st.text_area(t['textarea_label'], height=150, placeholder=t['textarea_placeholder'])
+    
+    # 文本输入区域（简化placeholder，添加单位说明）
+    spectrum_text = st.text_area(
+        t['textarea_label'], 
+        height=150, 
+        placeholder=t['textarea_placeholder']
+    )
+    
+    # 单位说明
+    st.caption(t['unit_note'])
     
     # 示例数据按钮
     if st.button(t['example_btn']):
