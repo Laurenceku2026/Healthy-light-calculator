@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from io import StringIO, BytesIO
+from io import StringIO
 import re
 import base64
 from datetime import datetime
@@ -107,7 +107,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'well_below': '未达标',
         'well_meet': '✅ 达标',
         'well_not_meet': '❌ 未达标',
-        'well_exceed': '✨ 超出标准',
         
         'rating_excellent': '⭐ **日间健康评级：优秀** (EML {:.0f} ≥ 250) — 有助于提升日间警觉性与工作效率',
         'rating_good': '🌤️ **日间健康评级：基础达标** (EML {:.0f} ≥ 150) — 满足 WELL 基础要求',
@@ -144,7 +143,8 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'report_title': '健康照明 EML/m-EDI 分析报告',
         'report_date': '报告日期',
         'report_analyst': '分析人',
-        'report_summary': '结论摘要'
+        
+        'clear_data': '清除计算结果'
     },
     'en': {
         'page_title': 'Healthy Lighting Calculator (EML / m-EDI)',
@@ -213,7 +213,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'well_below': 'Below Standard',
         'well_meet': '✅ Meet',
         'well_not_meet': '❌ Not Meet',
-        'well_exceed': '✨ Exceed',
         
         'rating_excellent': '⭐ **Daytime Rating: Excellent** (EML {:.0f} ≥ 250) — Promotes daytime alertness and work efficiency',
         'rating_good': '🌤️ **Daytime Rating: Basic Compliance** (EML {:.0f} ≥ 150) — Meets WELL basic requirements',
@@ -250,7 +249,8 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'report_title': 'Healthy Lighting EML/m-EDI Analysis Report',
         'report_date': 'Report Date',
         'report_analyst': 'Analyst',
-        'report_summary': 'Summary'
+        
+        'clear_data': 'Clear Results'
     }
 }
 
@@ -438,7 +438,7 @@ def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lam
     
     # 明视觉光谱 V(λ)（归一化后显示在同一尺度）
     v_max = np.max(v_lambda)
-    if v_max > 0:
+    if v_max > 0 and np.max(interp_spectrum) > 0:
         v_scaled = v_lambda / v_max * np.max(interp_spectrum) * 0.6
         fig.add_trace(go.Scatter(
             x=std_wl, y=v_scaled, 
@@ -472,8 +472,8 @@ def create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_lam
 
 
 def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux, 
-                         well_results, fig, input_min, input_max, step, num_points):
-    """生成 Word 格式的报告（HTML 格式，保存为 .doc）"""
+                         well_results, fig_html, input_min, input_max, step, num_points):
+    """生成 Word 格式的报告（使用 plotly HTML 嵌入，无需 kaleido）"""
     
     # 获取健康评级
     if eml >= 250:
@@ -500,10 +500,6 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
         </tr>
         """
     
-    # 将图表转换为 base64 图片
-    img_bytes = fig.to_image(format="png", width=800, height=500, scale=2)
-    img_base64 = base64.b64encode(img_bytes).decode()
-    
     # 分析人信息
     analyst_info = analyst_name if analyst_name else "未填写"
     if analyst_title:
@@ -511,12 +507,13 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
     
     current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    # Word 样式 - 标准正文样式，无特殊标题方块
+    # Word 样式 - 标准正文样式
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>{t['report_title']}</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         body {{
             font-family: '宋体', 'SimSun', 'Times New Roman', serif;
@@ -598,10 +595,9 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
             color: #666;
             text-align: center;
         }}
-        .spectrum-img {{
-            width: 100%;
+        .spectrum-container {{
             margin: 15px 0;
-            border: 1px solid #ddd;
+            text-align: center;
         }}
         .data-note {{
             background-color: #f8fafc;
@@ -659,7 +655,9 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 </table>
 
 <h2>光谱可视化</h2>
-<img src="data:image/png;base64,{img_base64}" class="spectrum-img" alt="Spectral Distribution">
+<div class="spectrum-container">
+    {fig_html}
+</div>
 
 <h2>数据处理说明</h2>
 <div class="data-note">
@@ -691,6 +689,10 @@ def main():
     # 初始化语言状态
     if 'lang' not in st.session_state:
         st.session_state.lang = "zh"
+    
+    # 初始化计算结果存储
+    if 'calc_data' not in st.session_state:
+        st.session_state.calc_data = None
     
     # 获取当前语言
     lang = st.session_state.lang
@@ -759,6 +761,13 @@ def main():
         if analyst_name:
             st.markdown("---")
             st.info(f"**{t['analyst_name']}:** {analyst_name}" + (f"\n\n**{t['analyst_title']}:** {analyst_title}" if analyst_title else ""))
+        
+        # 清除计算结果按钮
+        if st.session_state.calc_data is not None:
+            st.markdown("---")
+            if st.button(t['clear_data'], use_container_width=True):
+                st.session_state.calc_data = None
+                st.rerun()
     
     # ==================== 主要内容区域 ====================
     
@@ -777,6 +786,7 @@ def main():
     
     st.caption(t['unit_note'])
     
+    # 计算按钮
     if st.button(t['calc_btn'], type="primary", use_container_width=True):
         wl_input, power_input = None, None
         
@@ -799,6 +809,19 @@ def main():
                 st.info(t['detected'].format(input_min, input_max, step, len(wl_input)))
                 
                 eml, medi, lux, interp_spectrum, std_wl, v_data, nz_data = calculate_eml_and_medi(wl_input, power_input)
+                well_results = get_well_comparison(eml)
+                fig = create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_data, nz_data, step, t)
+                fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
+                
+                # 保存到 session_state
+                st.session_state.calc_data = {
+                    'eml': eml, 'medi': medi, 'lux': lux,
+                    'well_results': well_results,
+                    'fig': fig,
+                    'fig_html': fig_html,
+                    'input_min': input_min, 'input_max': input_max,
+                    'step': step, 'num_points': len(wl_input)
+                }
                 
                 # 显示结果
                 st.subheader(t['result_title'])
@@ -822,8 +845,6 @@ def main():
                 
                 # WELL 对比
                 st.subheader(t['well_comparison_title'])
-                well_results = get_well_comparison(eml)
-                
                 well_df = pd.DataFrame([
                     {
                         t['well_table_header']: t[r['level']],
@@ -840,9 +861,8 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                # 光谱可视化（包含明视觉光谱）
+                # 光谱可视化
                 st.subheader(t['vis_title'])
-                fig = create_spectrum_figure(wl_input, power_input, interp_spectrum, std_wl, v_data, nz_data, step, t)
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # 数据处理说明
@@ -854,7 +874,7 @@ def main():
                 # 导出 Word 报告
                 report_data = generate_word_report(
                     t, analyst_name, analyst_title, eml, medi, lux, 
-                    well_results, fig, input_min, input_max, step, len(wl_input)
+                    well_results, fig_html, input_min, input_max, step, len(wl_input)
                 )
                 
                 st.download_button(
@@ -867,6 +887,71 @@ def main():
         else:
             st.error(t['error_parse'])
     
+    # 如果有保存的计算结果且页面上没有新计算（显示之前的结果）
+    elif st.session_state.calc_data is not None:
+        data = st.session_state.calc_data
+        eml, medi, lux = data['eml'], data['medi'], data['lux']
+        well_results = data['well_results']
+        
+        st.subheader(t['result_title'])
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(t['eml_label'], f"{eml:.1f} lx")
+        with col2:
+            st.metric(t['medi_label'], f"{medi:.1f} lx", delta=t['medi_delta'])
+        with col3:
+            st.metric(t['lux_label'], f"{lux:.1f} lx")
+        
+        # 健康评级
+        if eml >= 250:
+            st.success(t['rating_excellent'].format(eml))
+        elif eml >= 150:
+            st.info(t['rating_good'].format(eml))
+        elif eml <= 50:
+            st.info(t['rating_night'].format(eml))
+        else:
+            st.warning(t['rating_moderate'].format(eml))
+        
+        # WELL 对比
+        st.subheader(t['well_comparison_title'])
+        well_df = pd.DataFrame([
+            {
+                t['well_table_header']: t[r['level']],
+                t['well_eml_requirement']: f"≥ {r['eml_min']} lx",
+                t['well_medi_requirement']: f"≥ {r['medi_min']} lx",
+                t['well_status']: "✅ " + t['well_meet'] if r['eml_met'] else "❌ " + t['well_not_meet']
+            }
+            for r in well_results
+        ])
+        st.table(well_df)
+        
+        # 光谱可视化
+        st.subheader(t['vis_title'])
+        st.plotly_chart(data['fig'], use_container_width=True)
+        
+        # 数据处理说明
+        with st.expander(t['data_note_title']):
+            st.markdown(t['data_note_content'].format(
+                data['num_points'], data['input_min'], data['input_max'], 
+                data['step'], 81
+            ))
+        
+        # 导出 Word 报告
+        report_data = generate_word_report(
+            t, analyst_name, analyst_title, eml, medi, lux, 
+            well_results, data['fig_html'], data['input_min'], 
+            data['input_max'], data['step'], data['num_points']
+        )
+        
+        st.download_button(
+            label=t['export_btn'],
+            data=report_data,
+            file_name=f"EML_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.doc",
+            mime="application/msword",
+            use_container_width=True
+        )
+    
+    # 页脚
     st.divider()
     st.caption(t['footer'])
 
