@@ -6,6 +6,7 @@ from io import StringIO, BytesIO
 import re
 import base64
 from datetime import datetime
+import plotly.io as pio
 
 # ==================== 自定义梯形积分函数（兼容所有 NumPy 版本）====================
 def trapezoid(y, x):
@@ -126,7 +127,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **边界处理**: 超出 380-780nm 范围的数据自动补 0
         ''',
         
-        'export_btn': '📥 导出完整报告 (HTML)',
+        'export_btn': '📥 导出 Word 报告 (.doc)',
         
         'warning_input': '请先上传文件或输入数据。',
         'error_parse': '光谱数据解析失败，请检查格式。需要两列：波长(nm) 和 功率(W/m²/nm)',
@@ -231,13 +232,13 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **Boundary Handling**: Values outside 380-780nm are automatically set to 0
         ''',
         
-        'export_btn': '📥 Export Full Report (HTML)',
+        'export_btn': '📥 Export Word Report (.doc)',
         
         'warning_input': 'Please upload a file or enter data first.',
         'error_parse': 'Failed to parse spectral data. Please check format. Need two columns: Wavelength(nm) and Power(W/m²/nm)',
         'error_no_overlap': 'Error: Input wavelength range has no overlap with standard range (380-780nm). Cannot calculate.',
         
-        'footer': '⚠️ Disclaimer: This tool is based on built-in spectral response functions and user input. Not for professional medical or lighting certification advice.',
+        'footer': '⚠️ Disclaimer: This tool is built-in spectral response functions and user input. Not for professional medical or lighting certification advice.',
         
         'detected': '📊 Detected input: wavelength range {:.0f} - {:.0f} nm, average step {:.2f} nm, data points: {}',
         
@@ -407,14 +408,16 @@ def get_well_comparison(eml):
             'eml_min': std['eml_min'],
             'medi_min': std['medi_min'],
             'eml_met': eml_met,
-            'medi_met': eml >= std['eml_min']  # m-EDI 条件相同
+            'medi_met': eml >= std['eml_min']
         })
     
     return results
 
 
-def generate_html_report(t, analyst_name, analyst_title, eml, medi, lux, well_results, fig, input_min, input_max, step, num_points):
-    """生成 HTML 格式的报告"""
+def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux, well_results, 
+                         fig, input_min, input_max, step, num_points, wl_input, power_input, 
+                         interp_spectrum, std_wl, v_data, nz_data):
+    """生成 Word 格式的报告（HTML 格式，保存为 .doc）"""
     
     # 获取健康评级文本
     if eml >= 250:
@@ -440,182 +443,201 @@ def generate_html_report(t, analyst_name, analyst_title, eml, medi, lux, well_re
         well_rows += f"""
         <tr style="background-color: {row_color};">
             <td style="padding: 8px; border: 1px solid #ddd;">{level_text}</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">≥ {r['eml_min']} lx</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">≥ {r['medi_min']} lx</td>
-            <td style="padding: 8px; border: 1px solid #ddd;">{status_icon} {status_text}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">≥ {r['eml_min']} lx</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">≥ {r['medi_min']} lx</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">{status_icon} {status_text}</td>
         </tr>
         """
     
-    # 获取光谱图的 base64 编码
-    img_bytes = fig.to_image(format="png", width=800, height=500)
-    img_base64 = base64.b64encode(img_bytes).decode()
+    # 生成光谱图的 HTML（使用 plotly 的 HTML 输出，避免 kaleido 依赖）
+    fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
     
     # 分析人信息
     analyst_info = analyst_name if analyst_name else "未填写"
     if analyst_title:
         analyst_info += f" ({analyst_title})"
     
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>{t['report_title']}</title>
-        <style>
-            body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                max-width: 1000px;
-                margin: 0 auto;
-                padding: 20px;
-                background-color: #f5f5f5;
-            }}
-            .container {{
-                background-color: white;
-                border-radius: 12px;
-                padding: 30px;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            }}
-            h1 {{
-                color: #1e3a5f;
-                border-bottom: 3px solid #4f46e5;
-                padding-bottom: 10px;
-            }}
-            h2 {{
-                color: #334155;
-                margin-top: 25px;
-                border-left: 4px solid #4f46e5;
-                padding-left: 15px;
-            }}
-            .header-info {{
-                background-color: #f8fafc;
-                padding: 15px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-            }}
-            .metrics {{
-                display: flex;
-                gap: 20px;
-                margin: 20px 0;
-                flex-wrap: wrap;
-            }}
-            .metric-card {{
-                flex: 1;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 20px;
-                border-radius: 12px;
-                text-align: center;
-                min-width: 150px;
-            }}
-            .metric-card.illuminance {{
-                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            }}
-            .metric-value {{
-                font-size: 36px;
-                font-weight: bold;
-            }}
-            .metric-label {{
-                font-size: 14px;
-                opacity: 0.9;
-                margin-top: 5px;
-            }}
-            .rating-badge {{
-                display: inline-block;
-                background-color: {rating_color};
-                color: white;
-                padding: 8px 16px;
-                border-radius: 20px;
-                font-weight: bold;
-                margin: 15px 0;
-            }}
-            table {{
-                width: 100%;
-                border-collapse: collapse;
-                margin: 15px 0;
-            }}
-            th {{
-                background-color: #4f46e5;
-                color: white;
-                padding: 10px;
-                border: 1px solid #ddd;
-            }}
-            .footer {{
-                margin-top: 30px;
-                padding-top: 20px;
-                border-top: 1px solid #ddd;
-                font-size: 12px;
-                color: #666;
-                text-align: center;
-            }}
-            .spectrum-img {{
-                width: 100%;
-                margin: 20px 0;
-                border-radius: 8px;
-                border: 1px solid #ddd;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>💡 {t['report_title']}</h1>
-            
-            <div class="header-info">
-                <p><strong>{t['report_date']}:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-                <p><strong>{t['report_analyst']}:</strong> {analyst_info}</p>
-            </div>
-            
-            <h2>📊 {t['result_title']}</h2>
-            <div class="metrics">
-                <div class="metric-card">
-                    <div class="metric-value">{eml:.1f} lx</div>
-                    <div class="metric-label">{t['eml_label']}</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-value">{medi:.1f} lx</div>
-                    <div class="metric-label">{t['medi_label']}</div>
-                </div>
-                <div class="metric-card illuminance">
-                    <div class="metric-value">{lux:.1f} lx</div>
-                    <div class="metric-label">{t['lux_label']}</div>
-                </div>
-            </div>
-            
-            <div class="rating-badge">{rating_text}</div>
-            
-            <h2>📋 {t['well_comparison_title']}</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>{t['well_table_header']}</th>
-                        <th>{t['well_eml_requirement']}</th>
-                        <th>{t['well_medi_requirement']}</th>
-                        <th>{t['well_status']}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {well_rows}
-                </tbody>
-            </table>
-            
-            <h2>📈 {t['vis_title']}</h2>
-            <img src="data:image/png;base64,{img_base64}" class="spectrum-img" alt="Spectral Visualization">
-            
-            <h2>🔧 {t['data_note_title']}</h2>
-            <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px;">
-                <ul style="margin: 0;">
-                    <li>{t['data_note_content'].format(num_points, input_min, input_max, step, 81)}</li>
-                </ul>
-            </div>
-            
-            <div class="footer">
-                {t['footer']}
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    # 获取当前时间
+    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    return html_content
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>{t['report_title']}</title>
+    <style>
+        body {{
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 40px auto;
+            padding: 20px;
+            max-width: 1000px;
+            background-color: #f5f5f5;
+        }}
+        .report-container {{
+            background-color: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            color: #1e3a5f;
+            border-bottom: 3px solid #4f46e5;
+            padding-bottom: 10px;
+        }}
+        h2 {{
+            color: #334155;
+            margin-top: 25px;
+            border-left: 4px solid #4f46e5;
+            padding-left: 15px;
+        }}
+        .header-info {{
+            background-color: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }}
+        .metrics {{
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }}
+        .metric-card {{
+            flex: 1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            min-width: 150px;
+        }}
+        .metric-card.illuminance {{
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        }}
+        .metric-value {{
+            font-size: 36px;
+            font-weight: bold;
+        }}
+        .metric-label {{
+            font-size: 14px;
+            opacity: 0.9;
+            margin-top: 5px;
+        }}
+        .rating-badge {{
+            display: inline-block;
+            background-color: {rating_color};
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 15px 0;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }}
+        th {{
+            background-color: #4f46e5;
+            color: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+        }}
+        td {{
+            padding: 8px;
+            border: 1px solid #ddd;
+        }}
+        .footer {{
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 12px;
+            color: #666;
+            text-align: center;
+        }}
+        .spectrum-container {{
+            margin: 20px 0;
+            text-align: center;
+        }}
+        .data-note {{
+            background-color: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }}
+        .data-note ul {{
+            margin: 0;
+            padding-left: 20px;
+        }}
+    </style>
+</head>
+<body>
+<div class="report-container">
+    <h1>💡 {t['report_title']}</h1>
+    
+    <div class="header-info">
+        <p><strong>{t['report_date']}:</strong> {current_time}</p>
+        <p><strong>{t['report_analyst']}:</strong> {analyst_info}</p>
+    </div>
+    
+    <h2>📊 {t['result_title']}</h2>
+    <div class="metrics">
+        <div class="metric-card">
+            <div class="metric-value">{eml:.1f} lx</div>
+            <div class="metric-label">{t['eml_label']}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{medi:.1f} lx</div>
+            <div class="metric-label">{t['medi_label']}</div>
+        </div>
+        <div class="metric-card illuminance">
+            <div class="metric-value">{lux:.1f} lx</div>
+            <div class="metric-label">{t['lux_label']}</div>
+        </div>
+    </div>
+    
+    <div class="rating-badge">{rating_text}</div>
+    
+    <h2>📋 {t['well_comparison_title']}</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>{t['well_table_header']}</th>
+                <th>{t['well_eml_requirement']}</th>
+                <th>{t['well_medi_requirement']}</th>
+                <th>{t['well_status']}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {well_rows}
+        </tbody>
+    </table>
+    
+    <h2>📈 {t['vis_title']}</h2>
+    <div class="spectrum-container">
+        {fig_html}
+    </div>
+    
+    <h2>🔧 {t['data_note_title']}</h2>
+    <div class="data-note">
+        <ul>
+            <li><strong>原始数据:</strong> {num_points} 个数据点，波长范围 {input_min:.0f} - {input_max:.0f} nm，平均步长 {step:.2f} nm</li>
+            <li><strong>标准网格:</strong> 380-780 nm，固定步长 5 nm（共 81 个点）</li>
+            <li><strong>插值方法:</strong> 线性插值 (numpy.interp)</li>
+            <li><strong>边界处理:</strong> 超出 380-780nm 范围的数据自动补 0</li>
+        </ul>
+    </div>
+    
+    <div class="footer">
+        {t['footer']}
+    </div>
+</div>
+</body>
+</html>
+"""
+    
+    # 保存为 .doc 文件（Word 可以打开）
+    return html_content.encode('utf-8')
 
 
 # ==================== Streamlit UI ====================
@@ -757,16 +779,6 @@ def main():
                 # 核心计算
                 eml, medi, lux, interp_spectrum, std_wl, v_data, nz_data = calculate_eml_and_medi(wl_input, power_input)
                 
-                # 保存到 session_state
-                st.session_state.calc_results = {
-                    'eml': eml, 'medi': medi, 'lux': lux,
-                    'wl_input': wl_input, 'power_input': power_input,
-                    'interp_spectrum': interp_spectrum, 'std_wl': std_wl,
-                    'input_min': input_min, 'input_max': input_max,
-                    'step': step, 'num_points': len(wl_input),
-                    'v_data': v_data, 'nz_data': nz_data
-                }
-                
                 # 显示结果
                 st.subheader(t['result_title'])
                 col1, col2, col3 = st.columns(3)
@@ -847,7 +859,8 @@ def main():
                     yaxis_title="Power (W/m²/nm)",
                     legend_title="Spectrum Type",
                     template="plotly_white",
-                    hovermode='x unified'
+                    hovermode='x unified',
+                    height=500
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
@@ -857,17 +870,18 @@ def main():
                         len(wl_input), input_min, input_max, step, len(std_wl)
                     ))
                 
-                # 导出报告按钮
-                html_report = generate_html_report(
+                # 导出 Word 报告按钮
+                report_data = generate_word_report(
                     t, analyst_name, analyst_title, eml, medi, lux, 
-                    well_results, fig, input_min, input_max, step, len(wl_input)
+                    well_results, fig, input_min, input_max, step, len(wl_input),
+                    wl_input, power_input, interp_spectrum, std_wl, v_data, nz_data
                 )
                 
                 st.download_button(
                     label=t['export_btn'],
-                    data=html_report,
-                    file_name=f"EML_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                    mime="text/html",
+                    data=report_data,
+                    file_name=f"EML_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.doc",
+                    mime="application/msword",
                     use_container_width=True
                 )
         else:
