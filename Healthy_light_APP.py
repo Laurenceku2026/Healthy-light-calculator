@@ -20,10 +20,14 @@ EML_CONSTANT = 72983.25  # = KM * 106.857，简化公式常数
 # ==================== 数据文件路径 ====================
 SPECTRAL_DATA_FILE = "spectral_data.json"
 
-# ==================== 预设的 CIE S026:2018 标准数据 ====================
-DEFAULT_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm, 5nm步长
+# ==================== 正确的预设数据（CIE S 026:2018 标准）====================
+# 波长范围: 380-780nm, 步长 5nm, 共 81 个点
+# V(λ) 峰值: 555 nm = 1.0000
+# Nz(λ) 峰值: 490 nm = 1.0000
 
-# 预设 V(λ) 数据（CIE S026 明视觉，峰值 555nm）
+DEFAULT_WAVELENGTHS = list(range(380, 781, 5))
+
+# V(λ) 明视觉数据（CIE S 026:2018 标准，峰值 555nm = 1.0）
 DEFAULT_V_LAMBDA = [
     0.000039, 0.000064, 0.000120, 0.000217, 0.000396, 0.000640, 0.001210, 0.002180, 0.004000, 0.007300,
     0.011600, 0.016840, 0.023000, 0.029800, 0.038000, 0.048000, 0.060000, 0.073900, 0.090980, 0.112600,
@@ -36,7 +40,7 @@ DEFAULT_V_LAMBDA = [
     0.000015
 ]
 
-# 预设 Nz(λ) 数据（CIE S026 黑视素，峰值 490nm）
+# Nz(λ) 黑视素数据（CIE S 026:2018 标准，峰值 490nm = 1.0）
 DEFAULT_NZ_LAMBDA = [
     0.000000, 0.000000, 0.000000, 0.000000, 0.000100, 0.000200, 0.000400, 0.000700, 0.001300, 0.002200,
     0.003500, 0.005500, 0.008000, 0.012000, 0.018000, 0.026000, 0.038000, 0.054000, 0.077000, 0.110000,
@@ -256,8 +260,13 @@ def admin_dialog():
             mode='lines', name='Nz(λ) 黑视素',
             line=dict(color='blue', width=2)
         ))
+        # 标记峰值位置
+        v_peak_idx = np.argmax(dataframe['V(λ) 明视觉'].values)
+        nz_peak_idx = np.argmax(dataframe['Nz(λ) 黑视素'].values)
+        fig.add_vline(x=dataframe['波长 (nm)'].iloc[v_peak_idx], line_dash="solid", line_color="red", opacity=0.5)
+        fig.add_vline(x=dataframe['波长 (nm)'].iloc[nz_peak_idx], line_dash="solid", line_color="blue", opacity=0.5)
         fig.update_layout(
-            title="明视觉光谱 (Vλ) vs 黑视素光谱 (Nz)",
+            title="明视觉光谱 (Vλ) vs 黑视素光谱 (Nz) - 红色虚线峰值 555nm, 蓝色实线峰值 490nm",
             xaxis_title="波长 (nm)",
             yaxis_title="相对灵敏度",
             template="plotly_white",
@@ -268,6 +277,7 @@ def admin_dialog():
     # 数据编辑表格
     st.subheader("📊 光谱数据编辑")
     st.caption("💡 提示：波长列可编辑，支持任意步长。保存时会自动插值到 5nm 标准网格。")
+    st.caption("📌 标准数据：V(λ) 峰值应在 555nm，Nz(λ) 峰值应在 490nm")
     
     edited_df = st.data_editor(
         df,
@@ -399,8 +409,8 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 
 其中：
 - $K_m = 683.002$ lm/W（明视觉最大光谱光视效能）
-- $V(\\lambda)$：明视觉光谱光视效能函数
-- $N_z(\\lambda)$：黑视素光谱光视效能函数
+- $V(\\lambda)$：明视觉光谱光视效能函数（峰值 555nm）
+- $N_z(\\lambda)$：黑视素光谱光视效能函数（峰值 490nm）
 
 ### 健康基准
 
@@ -408,7 +418,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **夜间 (家居/睡眠)**：EML ≤ 50
         ''',
         'contact': '📞 联系：✉️ 电邮: Techlife2027@gmail.com',
-        'loaded': '✅ 系统已加载标准光谱响应函数 (CIE S026:2018)',
+        'loaded': '✅ 系统已加载标准光谱响应函数 (CIE S026:2018) - V(λ)峰值555nm, Nz(λ)峰值490nm',
         'input_title': '1️⃣ 输入光源光谱功率分布 (SPD)',
         'upload_label': '选项 A: 上传 CSV/TXT 文件',
         'upload_help': '文件应包含两列: 波长(nm), 功率(W/m²/nm)。支持任意步长',
@@ -478,8 +488,8 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 
 Where:
 - $K_m = 683.002$ lm/W (maximum photopic luminous efficacy)
-- $V(\\lambda)$: photopic spectral efficiency function
-- $N_z(\\lambda)$: melanopic spectral efficiency function
+- $V(\\lambda)$: photopic spectral efficiency function (peak at 555nm)
+- $N_z(\\lambda)$: melanopic spectral efficiency function (peak at 490nm)
 
 ### Health Benchmarks
 
@@ -487,7 +497,7 @@ Where:
 - **Nighttime (Home/Sleep)**: EML ≤ 50
         ''',
         'contact': '📞 Contact: ✉️ Email: Techlife2027@gmail.com',
-        'loaded': '✅ Standard spectral response functions loaded (CIE S026:2018)',
+        'loaded': '✅ Standard spectral response functions loaded (CIE S026:2018) - V(λ) peak at 555nm, Nz(λ) peak at 490nm',
         'input_title': '1️⃣ Input Light Source Spectral Power Distribution (SPD)',
         'upload_label': 'Option A: Upload CSV/TXT File',
         'upload_help': 'File should contain two columns: Wavelength(nm), Power(W/m²/nm)',
@@ -691,10 +701,12 @@ def main():
         st.markdown("---")
         st.caption("📊 当前使用的光谱数据")
         wavelengths, v_lambda, nz_lambda = load_spectral_data()
+        v_peak_idx = np.argmax(v_lambda)
+        nz_peak_idx = np.argmax(nz_lambda)
         st.caption(f"波长范围: {wavelengths[0]}-{wavelengths[-1]} nm")
         st.caption(f"数据点数: {len(wavelengths)}")
-        st.caption(f"V(λ) 峰值: {max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
-        st.caption(f"Nz(λ) 峰值: {max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
+        st.caption(f"V(λ) 峰值: {max(v_lambda):.4f} @ {wavelengths[v_peak_idx]} nm")
+        st.caption(f"Nz(λ) 峰值: {max(nz_lambda):.4f} @ {wavelengths[nz_peak_idx]} nm")
     
     # 主区域 - 光谱输入
     st.subheader(t['input_title'])
