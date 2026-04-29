@@ -43,6 +43,11 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **夜间 (家居/睡眠)**：EML ≤ 50（有助于褪黑素分泌，助眠）
         ''',
         
+        'about_system': 'ℹ️ 关于系统',
+        'analyst_name': '分析人姓名',
+        'analyst_title': '分析人头衔（可选）',
+        'contact': '📞 联系：✉️ 电邮: Techlife2027@gmail.com',
+        
         'loaded': '✅ 系统已加载标准光谱响应函数: V(λ) 和 Nz(λ) (波长范围: 380-780nm, 步长: 5nm)',
         
         'input_title': '1️⃣ 输入光源光谱功率分布 (SPD)',
@@ -51,7 +56,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'textarea_label': '选项 B: 粘贴或输入光谱数据',
         'textarea_placeholder': '波长(nm),功率(W/m²/nm)\n380 0.0012\n385 0.0021\n390 0.0035',
         'unit_note': '💡 单位说明：功率单位为 **W/m²/nm** (瓦每平方米每纳米)，这是 EML 计算的标准单位',
-        'example_btn': '📋 加载示例数据 (5nm步长)',
         'calc_btn': '🚀 计算 EML / m-EDI',
         
         'result_title': '📊 计算结果',
@@ -85,7 +89,10 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         
         'footer': '⚠️ 免责声明: 本工具计算结果基于内置光谱响应函数与用户输入。不构成专业医疗或照明认证建议。',
         
-        'detected': '📊 检测到输入数据: 波长范围 {:.0f} - {:.0f} nm，平均步长 {:.2f} nm，数据点数量: {}'
+        'detected': '📊 检测到输入数据: 波长范围 {:.0f} - {:.0f} nm，平均步长 {:.2f} nm，数据点数量: {}',
+        
+        'name_placeholder': '请输入姓名',
+        'title_placeholder': '请输入头衔（可选）'
     },
     'en': {
         'page_title': 'Healthy Lighting Calculator (EML / m-EDI)',
@@ -122,6 +129,11 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **Nighttime (Home/Sleep)**: EML ≤ 50 (promotes melatonin secretion and sleep)
         ''',
         
+        'about_system': 'ℹ️ About System',
+        'analyst_name': 'Analyst Name',
+        'analyst_title': 'Analyst Title (Optional)',
+        'contact': '📞 Contact: ✉️ Email: Techlife2027@gmail.com',
+        
         'loaded': '✅ Standard spectral response functions loaded: V(λ) and Nz(λ) (Range: 380-780nm, Step: 5nm)',
         
         'input_title': '1️⃣ Input Light Source Spectral Power Distribution (SPD)',
@@ -130,7 +142,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'textarea_label': 'Option B: Paste or Enter Spectral Data',
         'textarea_placeholder': 'Wavelength(nm),Power(W/m²/nm)\n380 0.0012\n385 0.0021\n390 0.0035',
         'unit_note': '💡 Unit Note: Power unit is **W/m²/nm** (Watts per square meter per nanometer), the standard unit for EML calculation',
-        'example_btn': '📋 Load Example Data (5nm step)',
         'calc_btn': '🚀 Calculate EML / m-EDI',
         
         'result_title': '📊 Results',
@@ -164,7 +175,10 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         
         'footer': '⚠️ Disclaimer: This tool is based on built-in spectral response functions and user input. Not for professional medical or lighting certification advice.',
         
-        'detected': '📊 Detected input: wavelength range {:.0f} - {:.0f} nm, average step {:.2f} nm, data points: {}'
+        'detected': '📊 Detected input: wavelength range {:.0f} - {:.0f} nm, average step {:.2f} nm, data points: {}',
+        
+        'name_placeholder': 'Enter your name',
+        'title_placeholder': 'Enter your title (optional)'
     }
 }
 
@@ -225,10 +239,6 @@ def detect_wavelength_step(wavelengths):
 def parse_spectrum_flexible(text):
     """
     灵活解析光谱数据 - 支持任意分隔符（空格、逗号、制表符等）
-    支持格式：
-    - "波长 功率" 或 "波长,功率"
-    - "波长    功率" (多个空格)
-    - CSV格式
     """
     try:
         lines = text.strip().split('\n')
@@ -242,7 +252,6 @@ def parse_spectrum_flexible(text):
             
             # 使用正则表达式分割：支持空格、逗号、制表符
             parts = re.split(r'[,\s\t]+', line)
-            # 过滤空字符串
             parts = [p for p in parts if p]
             
             if len(parts) >= 2:
@@ -271,23 +280,12 @@ def parse_spectrum_flexible(text):
 
 
 def linear_interpolate_to_standard_grid(x_input, y_input, x_standard):
-    """
-    线性插值算法 - 将任意步长的数据插值到标准网格
-    
-    参数:
-        x_input: 原始波长数组 (任意步长，不一定等距)
-        y_input: 原始功率数组
-        x_standard: 目标标准波长网格 (380-780nm, 5nm步长)
-    
-    返回:
-        插值后的功率数组
-    """
+    """线性插值算法 - 将任意步长的数据插值到标准网格"""
     x_input = np.asarray(x_input)
     y_input = np.asarray(y_input)
     x_standard = np.asarray(x_standard)
     
-    # 线性插值
-    # left=0, right=0: 超出输入范围的波长补0
+    # 线性插值，超出范围补0
     y_interpolated = np.interp(x_standard, x_input, y_input, left=0, right=0)
     
     return y_interpolated
@@ -305,7 +303,10 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     interp_spectrum = linear_interpolate_to_standard_grid(wavelengths, spectrum, std_wavelengths)
     
     # 使用简化公式: EML = 72983.25 * ∫ E(λ) * Nz(λ) dλ
-    weighted_integral_nz = np.trapz(interp_spectrum * nz_lambda, std_wavelengths)
+    # 修复：使用 scipy.integrate 或手动计算梯形积分来避免版本兼容问题
+    weighted = interp_spectrum * nz_lambda
+    # 手动计算梯形积分（兼容所有 NumPy 版本）
+    weighted_integral_nz = np.trapz(weighted, std_wavelengths)
     eml_constant = 72983.25
     eml_value = eml_constant * weighted_integral_nz
     
@@ -314,25 +315,11 @@ def calculate_eml_and_medi(wavelengths, spectrum_w_m2_nm):
     
     # 视觉照度 E_v = Km * ∫ E(λ) * V(λ) dλ
     km = 683.002
-    weighted_integral_v = np.trapz(interp_spectrum * v_lambda, std_wavelengths)
+    weighted_visual = interp_spectrum * v_lambda
+    weighted_integral_v = np.trapz(weighted_visual, std_wavelengths)
     illuminance = km * weighted_integral_v
     
     return eml_value, medi_value, illuminance, interp_spectrum, std_wavelengths, v_lambda, nz_lambda
-
-
-# ==================== 语言切换按钮样式 ====================
-
-def language_buttons():
-    """返回两个红底白字的语言切换按钮"""
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("中文", key="lang_zh", use_container_width=True):
-            st.session_state.lang = "zh"
-            st.rerun()
-    with col2:
-        if st.button("English", key="lang_en", use_container_width=True):
-            st.session_state.lang = "en"
-            st.rerun()
 
 
 # ==================== Streamlit UI ====================
@@ -349,42 +336,23 @@ def main():
     lang = st.session_state.lang
     t = LANGUAGES[lang]
     
-    # 自定义CSS：红底白字按钮
+    # ==================== 自定义CSS（红底白字按钮）====================
     st.markdown("""
     <style>
-    div[data-testid="column"]:has(button[key="lang_zh"]) button,
-    div[data-testid="column"]:has(button[key="lang_en"]) button {
+    /* 右上角语言按钮样式 - 使用更精确的选择器 */
+    [data-testid="column"]:nth-of-type(2) button,
+    [data-testid="column"]:nth-of-type(3) button {
         background-color: #dc2626 !important;
         color: white !important;
         font-weight: bold !important;
         border: none !important;
     }
-    div[data-testid="column"]:has(button[key="lang_zh"]) button:hover,
-    div[data-testid="column"]:has(button[key="lang_en"]) button:hover {
+    [data-testid="column"]:nth-of-type(2) button:hover,
+    [data-testid="column"]:nth-of-type(3) button:hover {
         background-color: #b91c1c !important;
         color: white !important;
     }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # 标题行：标题 + 语言按钮
-    title_col, spacer, lang_col1, lang_col2 = st.columns([4, 2, 0.5, 0.5])
-    with title_col:
-        st.title("💡 " + t['page_title'])
-    
-    # 语言按钮放在右上角
-    with lang_col1:
-        if st.button("中文", key="lang_zh_top", use_container_width=True):
-            st.session_state.lang = "zh"
-            st.rerun()
-    with lang_col2:
-        if st.button("English", key="lang_en_top", use_container_width=True):
-            st.session_state.lang = "en"
-            st.rerun()
-    
-    # 应用红底白字样式到顶部按钮
-    st.markdown("""
-    <style>
+    /* 备用方案：通过 key 属性选择 */
     button[key="lang_zh_top"], button[key="lang_en_top"] {
         background-color: #dc2626 !important;
         color: white !important;
@@ -398,22 +366,72 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
+    # ==================== 顶部：标题 + 语言按钮 ====================
+    title_col, spacer, lang_col1, lang_col2 = st.columns([3, 4, 0.8, 0.8])
+    
+    with title_col:
+        st.title("💡 " + t['page_title'])
+    
+    with lang_col1:
+        if st.button("中文", key="lang_zh_top", use_container_width=True):
+            st.session_state.lang = "zh"
+            st.rerun()
+    
+    with lang_col2:
+        if st.button("English", key="lang_en_top", use_container_width=True):
+            st.session_state.lang = "en"
+            st.rerun()
+    
     st.markdown(t['page_subtitle'])
     
-    # 背景知识（带公式）
-    with st.expander(t['theory_title']):
-        st.markdown(t['theory_content'])
+    # ==================== 左侧边栏 ====================
+    with st.sidebar:
+        st.markdown("---")
+        
+        # 背景知识与计算公式
+        with st.expander(t['theory_title'], expanded=True):
+            st.markdown(t['theory_content'])
+        
+        st.markdown("---")
+        
+        # 关于系统
+        st.subheader(t['about_system'])
+        
+        # 分析人姓名输入
+        analyst_name = st.text_input(
+            t['analyst_name'],
+            placeholder=t['name_placeholder'],
+            key="analyst_name"
+        )
+        
+        # 分析人头衔输入（可选）
+        analyst_title = st.text_input(
+            t['analyst_title'],
+            placeholder=t['title_placeholder'],
+            key="analyst_title"
+        )
+        
+        st.markdown("---")
+        
+        # 联系信息
+        st.markdown(t['contact'])
+        
+        # 显示分析人信息（如果已输入）
+        if analyst_name:
+            st.markdown("---")
+            st.info(f"**{t['analyst_name']}:** {analyst_name}" + (f"\n\n**{t['analyst_title']}:** {analyst_title}" if analyst_title else ""))
+    
+    # ==================== 主要内容区域 ====================
     
     # 加载内置数据
     wavelengths, v_lambda, nz_lambda = load_spectral_data()
     st.success(t['loaded'])
     
-    # --- 输入区域 ---
+    # 输入区域
     st.subheader(t['input_title'])
     
     uploaded_file = st.file_uploader(t['upload_label'], type=["csv", "txt"], help=t['upload_help'])
     
-    # 文本输入区域（简化placeholder，添加单位说明）
     spectrum_text = st.text_area(
         t['textarea_label'], 
         height=150, 
@@ -423,25 +441,7 @@ def main():
     # 单位说明
     st.caption(t['unit_note'])
     
-    # 示例数据按钮
-    if st.button(t['example_btn']):
-        example_data = """380 0.0010
-385 0.0015
-390 0.0022
-400 0.0035
-420 0.0080
-450 0.0150
-480 0.0250
-500 0.0220
-550 0.0180
-600 0.0120
-650 0.0080
-700 0.0050
-750 0.0030
-780 0.0020"""
-        spectrum_text = example_data
-        st.rerun()
-    
+    # 计算按钮
     if st.button(t['calc_btn'], type="primary", use_container_width=True):
         wl_input, power_input = None, None
         
