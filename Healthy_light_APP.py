@@ -599,4 +599,12 @@ def main():
                     mime='text/csv'
                 )
         else:
-            st
+            st.error(t['error_parse'])
+    
+    # 页脚
+    st.divider()
+    st.caption(t['footer'])
+
+
+if __name__ == "__main__":
+    main()
