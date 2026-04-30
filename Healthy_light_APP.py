@@ -187,22 +187,36 @@ DEFAULT_NZ_LAMBDA = [
 if "debug_mode" not in st.session_state:
     st.session_state.debug_mode = False
 
-# ==================== 光谱数据管理 ====================
+# ==================== 光谱数据管理（修复版）====================
 def load_spectral_data():
-    """加载光谱数据，优先从 JSON 文件读取，否则使用预设数据"""
+    """
+    加载光谱数据，优先从 JSON 文件读取，否则使用预设数据
+    返回: (v_lambda, nz_lambda) 两个列表
+    """
     if os.path.exists(SPECTRAL_DATA_FILE):
         try:
             with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 v_lambda = data.get('v_lambda', DEFAULT_V_LAMBDA)
                 nz_lambda = data.get('nz_lambda', DEFAULT_NZ_LAMBDA)
+                # 验证数据长度
+                if len(v_lambda) != len(STANDARD_WAVELENGTHS):
+                    v_lambda = DEFAULT_V_LAMBDA
+                if len(nz_lambda) != len(STANDARD_WAVELENGTHS):
+                    nz_lambda = DEFAULT_NZ_LAMBDA
                 return v_lambda, nz_lambda
-        except Exception:
-            pass
+        except Exception as e:
+            st.warning(f"加载光谱数据失败，使用预设数据: {e}")
     return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
 
 def save_spectral_data(v_lambda, nz_lambda):
     """保存光谱数据到 JSON 文件"""
+    # 确保数据长度正确
+    if len(v_lambda) != len(STANDARD_WAVELENGTHS):
+        raise ValueError(f"V(λ) 数据长度不正确: 期望 {len(STANDARD_WAVELENGTHS)}, 实际 {len(v_lambda)}")
+    if len(nz_lambda) != len(STANDARD_WAVELENGTHS):
+        raise ValueError(f"Nz(λ) 数据长度不正确: 期望 {len(STANDARD_WAVELENGTHS)}, 实际 {len(nz_lambda)}")
+    
     data = {
         'v_lambda': v_lambda,
         'nz_lambda': nz_lambda,
@@ -210,6 +224,7 @@ def save_spectral_data(v_lambda, nz_lambda):
     }
     with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    st.success("✅ 光谱数据已保存到文件")
 
 def reset_to_default():
     """重置为预设数据"""
@@ -222,11 +237,6 @@ def interpolate_energy_conserving(x_input, y_input, x_target):
     """
     能量守恒插值 - 用于用户光谱数据
     保持原始光谱的总能量不变
-    
-    原理：
-    1. 将功率密度 (W/m²/nm) 转换为能量 (W/m²) = 功率密度 × 带宽
-    2. 插值能量到目标网格
-    3. 转换回功率密度 = 能量 / 目标带宽
     """
     x_input = np.asarray(x_input)
     y_input = np.asarray(y_input)
@@ -235,11 +245,11 @@ def interpolate_energy_conserving(x_input, y_input, x_target):
     if len(x_input) < 2 or len(y_input) < 2:
         return np.zeros_like(x_target)
     
-    # 计算原始数据的带宽（每个点代表的波长范围）
+    # 计算原始数据每个点代表的带宽
     dx_input = np.zeros_like(x_input)
-    dx_input[0] = x_input[1] - x_input[0]  # 第一个点使用第一个步长
-    dx_input[1:-1] = (x_input[2:] - x_input[:-2]) / 2  # 中间点使用前后步长的平均值
-    dx_input[-1] = x_input[-1] - x_input[-2]  # 最后一个点使用最后一个步长
+    dx_input[0] = x_input[1] - x_input[0]
+    dx_input[1:-1] = (x_input[2:] - x_input[:-2]) / 2
+    dx_input[-1] = x_input[-1] - x_input[-2]
     
     # 转换为能量 (W/m²)
     energy_input = y_input * dx_input
@@ -254,17 +264,13 @@ def interpolate_energy_conserving(x_input, y_input, x_target):
     dx_target[-1] = x_target[-1] - x_target[-2]
     
     # 转换回功率密度 (W/m²/nm)
-    # 避免除以零
     dx_target_safe = np.where(dx_target > 0, dx_target, 1.0)
     y_target = energy_target / dx_target_safe
     
     return y_target
 
 def interpolate_linear(x_input, y_input, x_target):
-    """
-    线性插值 - 用于 V(λ) 和 Nz(λ) 灵敏度函数
-    使用标准线性插值，超出范围补 0
-    """
+    """线性插值 - 用于 V(λ) 和 Nz(λ)"""
     x_input = np.asarray(x_input)
     y_input = np.asarray(y_input)
     x_target = np.asarray(x_target)
@@ -276,7 +282,7 @@ def interpolate_linear(x_input, y_input, x_target):
 
 # ==================== 积分函数 ====================
 def trapezoid(y, x):
-    """梯形积分，使用实际波长间隔"""
+    """梯形积分"""
     y = np.asarray(y)
     x = np.asarray(x)
     
@@ -296,10 +302,7 @@ def trapezoid(y, x):
 
 # ==================== EML 计算 ====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
-    """
-    计算 EML 和 m-EDI
-    所有输入数据必须在同一波长网格上
-    """
+    """计算 EML 和 m-EDI"""
     spectrum = np.asarray(spectrum_w_m2_nm)
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
@@ -307,7 +310,7 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     weighted_melanopic = spectrum * nz_lambda
     weighted_photopic = spectrum * v_lambda
     
-    # 积分（使用梯形积分，自动使用实际波长间隔）
+    # 积分
     integral_nz = trapezoid(weighted_melanopic, wavelengths)
     integral_v = trapezoid(weighted_photopic, wavelengths)
     
@@ -316,7 +319,6 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     illuminance = KM * integral_v
     medi = eml * 0.9063
     
-    # 调试输出
     if debug:
         st.write("### 🔍 调试信息")
         st.write(f"标准网格: {wavelengths[0]}-{wavelengths[-1]} nm, 步长 {STANDARD_DELTA} nm, 点数 {len(wavelengths)}")
@@ -336,18 +338,6 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
         st.write(f"EML = {EML_CONSTANT} × {integral_nz:.6e} = {eml:.2f} lx")
         st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
         st.write("===================")
-        
-        # 检查光谱覆盖范围
-        non_zero = np.sum(spectrum > 0)
-        st.write(f"非零数据点数: {non_zero} / {len(spectrum)}")
-        if non_zero < len(spectrum):
-            first_nonzero = np.argmax(spectrum > 0)
-            last_nonzero = len(spectrum) - 1 - np.argmax(spectrum[::-1] > 0)
-            st.warning(f"⚠️ 光谱覆盖范围: {wavelengths[first_nonzero]} - {wavelengths[last_nonzero]} nm")
-            if first_nonzero > 0:
-                st.warning(f"⚠️ 缺失: {wavelengths[0]} - {wavelengths[first_nonzero-1]} nm 自动补 0")
-            if last_nonzero < len(spectrum) - 1:
-                st.warning(f"⚠️ 缺失: {wavelengths[last_nonzero+1]} - {wavelengths[-1]} nm 自动补 0")
     
     return eml, medi, illuminance
 
@@ -382,7 +372,6 @@ def parse_user_spectrum(text):
         wavelengths = np.array(wavelengths)
         powers = np.array(powers)
         
-        # 按波长排序
         sort_idx = np.argsort(wavelengths)
         wavelengths = wavelengths[sort_idx]
         powers = powers[sort_idx]
@@ -473,7 +462,7 @@ def admin_dialog():
         fig.add_vline(x=dataframe['波长 (nm)'].iloc[v_peak_idx], line_dash="solid", line_color="red", opacity=0.5)
         fig.add_vline(x=dataframe['波长 (nm)'].iloc[nz_peak_idx], line_dash="solid", line_color="blue", opacity=0.5)
         fig.update_layout(
-            title="明视觉光谱 (Vλ) vs 黑视素光谱 (Nz) - 红色虚线峰值 555nm, 蓝色实线峰值 490nm",
+            title="明视觉光谱 (Vλ) vs 黑视素光谱 (Nz)",
             xaxis_title="波长 (nm)",
             yaxis_title="相对灵敏度",
             template="plotly_white",
@@ -482,7 +471,7 @@ def admin_dialog():
         return fig
     
     st.subheader("📊 光谱数据编辑")
-    st.caption("💡 提示：波长必须覆盖 380-780nm，保存时会自动插值到 5nm 标准网格。")
+    st.caption("💡 提示：波长固定为 380-780nm，步长 5nm。可以直接编辑数值。")
     st.caption("📌 标准数据：V(λ) 峰值应在 555nm，Nz(λ) 峰值应在 490nm")
     
     edited_df = st.data_editor(
@@ -499,7 +488,6 @@ def admin_dialog():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # 下载模板
         template_df = pd.DataFrame({
             '波长 (nm)': STANDARD_WAVELENGTHS,
             'V(λ) 明视觉': DEFAULT_V_LAMBDA,
@@ -515,7 +503,6 @@ def admin_dialog():
         )
     
     with col2:
-        # 上传文件
         uploaded_file = st.file_uploader(
             "📤 上传 CSV/Excel",
             type=["csv", "xlsx"],
@@ -529,7 +516,6 @@ def admin_dialog():
                 else:
                     upload_df = pd.read_excel(uploaded_file)
                 
-                # 查找列名
                 wavelength_col = None
                 v_col = None
                 nz_col = None
@@ -543,7 +529,6 @@ def admin_dialog():
                         nz_col = col
                 
                 if wavelength_col and v_col and nz_col:
-                    # 插值到标准网格
                     wl_upload = upload_df[wavelength_col].values
                     v_upload = upload_df[v_col].values
                     nz_upload = upload_df[nz_col].values
@@ -569,8 +554,15 @@ def admin_dialog():
     
     with col3:
         if st.button("🔄 重置为预设数据", use_container_width=True):
-            reset_to_default()
+            v, nz = reset_to_default()
             st.success("已重置为 CIE S026 标准数据")
+            # 更新表格
+            new_df = pd.DataFrame({
+                '波长 (nm)': STANDARD_WAVELENGTHS,
+                'V(λ) 明视觉': v,
+                'Nz(λ) 黑视素': nz
+            })
+            st.session_state.admin_data_editor = new_df.to_dict('records')
             st.rerun()
     
     st.markdown("---")
@@ -578,11 +570,13 @@ def admin_dialog():
     
     with col_save:
         if st.button("💾 保存到系统", type="primary", use_container_width=True):
-            v_lambda = edited_df['V(λ) 明视觉'].tolist()
-            nz_lambda = edited_df['Nz(λ) 黑视素'].tolist()
-            save_spectral_data(v_lambda, nz_lambda)
+            v_lambda_save = edited_df['V(λ) 明视觉'].tolist()
+            nz_lambda_save = edited_df['Nz(λ) 黑视素'].tolist()
+            save_spectral_data(v_lambda_save, nz_lambda_save)
             st.success("✅ 数据已保存！应用将使用新数据进行计算")
             st.info("📌 请关闭此对话框后重新计算")
+            # 清除认证状态，强制重新加载
+            st.session_state.admin_authenticated = False
     
     with col_cancel:
         if st.button("❌ 取消", use_container_width=True):
@@ -621,7 +615,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 - **夜间 (家居/睡眠)**：EML ≤ 50
         ''',
         'contact': '📞 联系：✉️ 电邮: Techlife2027@gmail.com',
-        'loaded': '✅ 系统已加载标准光谱响应函数 (CIE S026:2018) - V(λ)峰值555nm, Nz(λ)峰值490nm',
+        'loaded': '✅ 系统已加载标准光谱响应函数 (CIE S026:2018)',
         'input_title': '1️⃣ 输入光源光谱功率分布 (SPD)',
         'upload_label': '选项 A: 上传 CSV/TXT 文件',
         'upload_help': '文件应包含两列: 波长(nm), 功率(W/m²/nm)。支持任意步长',
@@ -701,7 +695,7 @@ Where:
 - **Nighttime (Home/Sleep)**: EML ≤ 50
         ''',
         'contact': '📞 Contact: ✉️ Email: Techlife2027@gmail.com',
-        'loaded': '✅ Standard spectral response functions loaded (CIE S026:2018) - V(λ) peak at 555nm, Nz(λ) peak at 490nm',
+        'loaded': '✅ Standard spectral response functions loaded (CIE S026:2018)',
         'input_title': '1️⃣ Input Light Source Spectral Power Distribution (SPD)',
         'upload_label': 'Option A: Upload CSV/TXT File',
         'upload_help': 'File should contain two columns: Wavelength(nm), Power(W/m²/nm)',
@@ -1066,8 +1060,4 @@ def main():
     st.caption(t['footer'])
 
 if __name__ == "__main__":
-    # 确保光谱数据文件存在
-    v, nz = load_spectral_data()
-    if v != DEFAULT_V_LAMBDA or nz != DEFAULT_NZ_LAMBDA:
-        save_spectral_data(DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA)
     main()
