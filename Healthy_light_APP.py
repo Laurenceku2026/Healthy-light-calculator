@@ -149,22 +149,6 @@ else:
     st.warning("请从 TechLife Suite 门户登录后访问")
     st.stop()
 
-# ==================== 侧边栏显示用户信息 ====================
-with st.sidebar:
-    remaining = get_user_remaining_trials(st.session_state.user_id)
-    lang = st.session_state.lang
-    if remaining == -1:
-        if lang == "zh":
-            st.info(f"🎫 剩余免费次数: ∞ (专业版)")
-        else:
-            st.info(f"🎫 Remaining Trials: ∞ (Pro)")
-    else:
-        if lang == "zh":
-            st.info(f"🎫 剩余免费次数: {remaining}")
-        else:
-            st.info(f"🎫 Remaining Trials: {remaining}")
-    st.markdown("---")
-
 # ==================== 数据文件路径 ====================
 SPECTRAL_DATA_FILE = "spectral_data.json"
 
@@ -754,7 +738,7 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 <div class="rating-badge">{rating_text}</div>
 
 <h2>{t['well_comparison_title']}</h2>
-</table>
+<table>
     <thead><tr><th>{t['well_table_header']}</th><th>{t['well_eml_requirement']}</th><th>{t['well_status']}</th></tr></thead>
     <tbody>{well_rows}</tbody>
 </table>
@@ -803,10 +787,24 @@ def main():
     
     st.markdown(t['page_subtitle'])
     
-    # 侧边栏 - 关于系统和分析人信息
+    # ==================== 侧边栏（用户信息在顶部）====================
     with st.sidebar:
-        # 用户信息已在上方显示
+        # 用户信息（顶部）
+        remaining = get_user_remaining_trials(st.session_state.user_id)
+        if remaining == -1:
+            if lang == "zh":
+                st.info(f"🎫 剩余免费次数: ∞ (专业版)")
+            else:
+                st.info(f"🎫 Remaining Trials: ∞ (Pro)")
+        else:
+            if lang == "zh":
+                st.info(f"🎫 剩余免费次数: {remaining}")
+            else:
+                st.info(f"🎫 Remaining Trials: {remaining}")
+        
         st.markdown("---")
+        
+        # 关于系统
         st.header(t['about_system'])
         st.markdown(t['about_text'])
         st.markdown("---")
