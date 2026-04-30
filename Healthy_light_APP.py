@@ -15,7 +15,6 @@ st.set_page_config(page_title="健康光计算器 (EML / m-EDI)", layout="wide")
 
 # ==================== 常量定义 ====================
 KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
-EML_CONSTANT = 72983.25  # = KM * 106.857，简化公式常数
 
 # ==================== 标准网格定义 ====================
 STANDARD_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm，步长5nm
@@ -187,36 +186,26 @@ DEFAULT_NZ_LAMBDA = [
 if "debug_mode" not in st.session_state:
     st.session_state.debug_mode = False
 
-# ==================== 光谱数据管理（修复版）====================
+# ==================== 光谱数据管理 ====================
 def load_spectral_data():
-    """
-    加载光谱数据，优先从 JSON 文件读取，否则使用预设数据
-    返回: (v_lambda, nz_lambda) 两个列表
-    """
+    """加载光谱数据，优先从 JSON 文件读取，否则使用预设数据"""
     if os.path.exists(SPECTRAL_DATA_FILE):
         try:
             with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 v_lambda = data.get('v_lambda', DEFAULT_V_LAMBDA)
                 nz_lambda = data.get('nz_lambda', DEFAULT_NZ_LAMBDA)
-                # 验证数据长度
                 if len(v_lambda) != len(STANDARD_WAVELENGTHS):
                     v_lambda = DEFAULT_V_LAMBDA
                 if len(nz_lambda) != len(STANDARD_WAVELENGTHS):
                     nz_lambda = DEFAULT_NZ_LAMBDA
                 return v_lambda, nz_lambda
-        except Exception as e:
-            st.warning(f"加载光谱数据失败，使用预设数据: {e}")
+        except Exception:
+            pass
     return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
 
 def save_spectral_data(v_lambda, nz_lambda):
     """保存光谱数据到 JSON 文件"""
-    # 确保数据长度正确
-    if len(v_lambda) != len(STANDARD_WAVELENGTHS):
-        raise ValueError(f"V(λ) 数据长度不正确: 期望 {len(STANDARD_WAVELENGTHS)}, 实际 {len(v_lambda)}")
-    if len(nz_lambda) != len(STANDARD_WAVELENGTHS):
-        raise ValueError(f"Nz(λ) 数据长度不正确: 期望 {len(STANDARD_WAVELENGTHS)}, 实际 {len(nz_lambda)}")
-    
     data = {
         'v_lambda': v_lambda,
         'nz_lambda': nz_lambda,
@@ -224,7 +213,6 @@ def save_spectral_data(v_lambda, nz_lambda):
     }
     with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    st.success("✅ 光谱数据已保存到文件")
 
 def reset_to_default():
     """重置为预设数据"""
@@ -234,10 +222,7 @@ def reset_to_default():
 
 # ==================== 插值函数 ====================
 def interpolate_energy_conserving(x_input, y_input, x_target):
-    """
-    能量守恒插值 - 用于用户光谱数据
-    保持原始光谱的总能量不变
-    """
+    """能量守恒插值 - 用于用户光谱数据"""
     x_input = np.asarray(x_input)
     y_input = np.asarray(y_input)
     x_target = np.asarray(x_target)
@@ -245,25 +230,19 @@ def interpolate_energy_conserving(x_input, y_input, x_target):
     if len(x_input) < 2 or len(y_input) < 2:
         return np.zeros_like(x_target)
     
-    # 计算原始数据每个点代表的带宽
     dx_input = np.zeros_like(x_input)
     dx_input[0] = x_input[1] - x_input[0]
     dx_input[1:-1] = (x_input[2:] - x_input[:-2]) / 2
     dx_input[-1] = x_input[-1] - x_input[-2]
     
-    # 转换为能量 (W/m²)
     energy_input = y_input * dx_input
-    
-    # 插值能量到目标网格
     energy_target = np.interp(x_target, x_input, energy_input, left=0, right=0)
     
-    # 计算目标网格的带宽
     dx_target = np.zeros_like(x_target)
     dx_target[0] = x_target[1] - x_target[0]
     dx_target[1:-1] = (x_target[2:] - x_target[:-2]) / 2
     dx_target[-1] = x_target[-1] - x_target[-2]
     
-    # 转换回功率密度 (W/m²/nm)
     dx_target_safe = np.where(dx_target > 0, dx_target, 1.0)
     y_target = energy_target / dx_target_safe
     
@@ -300,9 +279,12 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== EML 计算 ====================
+# ==================== EML 计算（动态常数）====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
-    """计算 EML 和 m-EDI"""
+    """
+    计算 EML 和 m-EDI
+    动态计算 EML_CONSTANT = KM × ∫ V(λ) dλ，自动适配步长
+    """
     spectrum = np.asarray(spectrum_w_m2_nm)
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
@@ -314,8 +296,12 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     integral_nz = trapezoid(weighted_melanopic, wavelengths)
     integral_v = trapezoid(weighted_photopic, wavelengths)
     
+    # 动态计算 EML_CONSTANT = KM × ∫ V(λ) dλ
+    integral_v_spectrum = trapezoid(v_lambda, wavelengths)
+    eml_constant = KM * integral_v_spectrum
+    
     # 计算 EML 和照度
-    eml = EML_CONSTANT * integral_nz
+    eml = eml_constant * integral_nz
     illuminance = KM * integral_v
     medi = eml * 0.9063
     
@@ -328,16 +314,23 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
         st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
         st.write(f"Nz(λ) 最大值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
         st.write("---")
+        st.write(f"∫ V(λ) dλ (动态) = {integral_v_spectrum:.6f}")
+        st.write(f"动态 EML_CONSTANT = KM × ∫ V(λ) dλ = {eml_constant:.2f}")
         st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
         st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
         st.write("---")
         st.write(f"KM = {KM}")
         st.write(f"视觉照度 = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
-        st.write("---")
-        st.write(f"EML_CONSTANT = {EML_CONSTANT}")
-        st.write(f"EML = {EML_CONSTANT} × {integral_nz:.6e} = {eml:.2f} lx")
+        st.write(f"EML = {eml_constant:.2f} × {integral_nz:.6e} = {eml:.2f} lx")
         st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
         st.write("===================")
+        
+        # 检查光谱覆盖范围
+        non_zero = np.sum(spectrum > 0)
+        if non_zero < len(spectrum):
+            first_nonzero = np.argmax(spectrum > 0)
+            last_nonzero = len(spectrum) - 1 - np.argmax(spectrum[::-1] > 0)
+            st.warning(f"⚠️ 光谱覆盖范围: {wavelengths[first_nonzero]} - {wavelengths[last_nonzero]} nm")
     
     return eml, medi, illuminance
 
@@ -428,20 +421,16 @@ def admin_dialog():
                 st.error("用户名或密码错误")
         return
     
-    # 已认证，显示管理界面
     st.success("✅ 管理员已登录")
     
-    # 加载当前数据
     current_v, current_nz = load_spectral_data()
     
-    # 创建 DataFrame 用于编辑
     df = pd.DataFrame({
         '波长 (nm)': STANDARD_WAVELENGTHS,
         'V(λ) 明视觉': current_v,
         'Nz(λ) 黑视素': current_nz
     })
     
-    # 实时图表预览
     st.subheader("📈 光谱曲线预览（实时更新）")
     chart_placeholder = st.empty()
     
@@ -472,7 +461,6 @@ def admin_dialog():
     
     st.subheader("📊 光谱数据编辑")
     st.caption("💡 提示：波长固定为 380-780nm，步长 5nm。可以直接编辑数值。")
-    st.caption("📌 标准数据：V(λ) 峰值应在 555nm，Nz(λ) 峰值应在 490nm")
     
     edited_df = st.data_editor(
         df,
@@ -554,13 +542,12 @@ def admin_dialog():
     
     with col3:
         if st.button("🔄 重置为预设数据", use_container_width=True):
-            v, nz = reset_to_default()
+            reset_to_default()
             st.success("已重置为 CIE S026 标准数据")
-            # 更新表格
             new_df = pd.DataFrame({
                 '波长 (nm)': STANDARD_WAVELENGTHS,
-                'V(λ) 明视觉': v,
-                'Nz(λ) 黑视素': nz
+                'V(λ) 明视觉': DEFAULT_V_LAMBDA,
+                'Nz(λ) 黑视素': DEFAULT_NZ_LAMBDA
             })
             st.session_state.admin_data_editor = new_df.to_dict('records')
             st.rerun()
@@ -574,9 +561,8 @@ def admin_dialog():
             nz_lambda_save = edited_df['Nz(λ) 黑视素'].tolist()
             save_spectral_data(v_lambda_save, nz_lambda_save)
             st.success("✅ 数据已保存！应用将使用新数据进行计算")
-            st.info("📌 请关闭此对话框后重新计算")
-            # 清除认证状态，强制重新加载
             st.session_state.admin_authenticated = False
+            st.rerun()
     
     with col_cancel:
         if st.button("❌ 取消", use_container_width=True):
@@ -599,8 +585,6 @@ TEXTS = {
 ### 计算公式
 
 $$EML = K_m \\int E(\\lambda) \\cdot N_z(\\lambda) \\, d\\lambda \\cdot \\frac{\\int V(\\lambda) \\, d\\lambda}{\\int N_z(\\lambda) \\, d\\lambda}$$
-
-$$EML = 72983.25 \\times \\int E(\\lambda) \\cdot N_z(\\lambda) \\, d\\lambda$$
 
 $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 
@@ -679,8 +663,6 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 ### Calculation Formulas
 
 $$EML = K_m \\int E(\\lambda) \\cdot N_z(\\lambda) \\, d\\lambda \\cdot \\frac{\\int V(\\lambda) \\, d\\lambda}{\\int N_z(\\lambda) \\, d\\lambda}$$
-
-$$EML = 72983.25 \\times \\int E(\\lambda) \\cdot N_z(\\lambda) \\, d\\lambda$$
 
 $$m\\text{-}EDI \\approx EML \\times 0.9063$$
 
@@ -857,7 +839,7 @@ def main():
     lang = st.session_state.lang
     t = TEXTS[lang]
     
-    # 顶部：标题 + 语言切换 + 管理员入口 + 调试开关
+    # 顶部按钮
     col_title, col_lang1, col_lang2, col_admin, col_debug = st.columns([5, 0.8, 0.8, 0.8, 0.8])
     
     with col_title:
@@ -884,9 +866,8 @@ def main():
     
     st.markdown(t['page_subtitle'])
     
-    # ==================== 侧边栏 ====================
+    # 侧边栏
     with st.sidebar:
-        # 用户信息
         st.markdown(f"### 👤 {st.session_state.username}")
         
         remaining = get_user_remaining_trials(st.session_state.user_id)
@@ -896,19 +877,15 @@ def main():
             st.info(f"🎫 剩余免费次数: {remaining}" if lang == "zh" else f"🎫 Remaining Trials: {remaining}")
         
         st.markdown("---")
-        
-        # 关于系统
         st.header(t['about_system'])
         st.markdown(t['about_text'])
         st.markdown("---")
         st.markdown(t['contact'])
         st.markdown("---")
         
-        # 分析人信息
         analyst_name = st.text_input(t['analyst_name'], placeholder=t['name_placeholder'], key="analyst_name")
         analyst_title = st.text_input(t['analyst_title'], placeholder=t['title_placeholder'], key="analyst_title")
         
-        # 显示当前使用的光谱数据信息
         st.markdown("---")
         st.caption("📊 当前使用的光谱数据")
         v_lambda, nz_lambda = load_spectral_data()
@@ -918,7 +895,7 @@ def main():
         st.caption(f"V(λ) 峰值: {max(v_lambda):.4f} @ {STANDARD_WAVELENGTHS[v_peak_idx]} nm")
         st.caption(f"Nz(λ) 峰值: {max(nz_lambda):.4f} @ {STANDARD_WAVELENGTHS[nz_peak_idx]} nm")
     
-    # ==================== 主区域 ====================
+    # 主区域
     st.subheader(t['input_title'])
     
     uploaded_file = st.file_uploader(t['upload_label'], type=["csv", "txt"], help=t['upload_help'])
@@ -926,7 +903,6 @@ def main():
     st.caption(t['unit_note'])
     
     if st.button(t['calc_btn'], type="primary", use_container_width=True):
-        # 消耗免费次数
         allowed, new_remaining, error_msg = consume_trial(st.session_state.user_id, "eml_calculator")
         if not allowed:
             st.error(error_msg)
@@ -946,20 +922,15 @@ def main():
                 input_min, input_max = wl_input[0], wl_input[-1]
                 st.info(t['detected'].format(input_min, input_max, step_in, len(wl_input)))
                 
-                # 加载 V(λ) 和 Nz(λ)
                 v_lambda, nz_lambda = load_spectral_data()
-                
-                # 用户光谱能量守恒插值到标准网格
                 interp_spectrum = interpolate_energy_conserving(wl_input, power_input, STANDARD_WAVELENGTHS)
                 
-                # 计算 EML
                 debug_mode = st.session_state.get("debug_mode", False)
                 eml, medi, lux = calculate_eml_and_medi(
                     interp_spectrum, v_lambda, nz_lambda, debug=debug_mode
                 )
                 well_results = get_well_comparison(eml)
                 
-                # 显示结果
                 st.subheader(t['result_title'])
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -978,7 +949,6 @@ def main():
                 else:
                     st.warning(t['rating_moderate'])
                 
-                # WELL 对比
                 st.subheader(t['well_comparison_title'])
                 well_df = pd.DataFrame([
                     {t['well_table_header']: (r['name_zh'] if lang == 'zh' else r['name_en']),
@@ -993,7 +963,6 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                # 光谱可视化
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
