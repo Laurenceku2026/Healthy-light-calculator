@@ -790,6 +790,10 @@ def main():
     # ==================== 侧边栏（用户信息在顶部）====================
     with st.sidebar:
         # 用户信息（顶部）
+        # 显示用户名（从 email 提取）
+        st.markdown(f"### 👤 {st.session_state.username}")
+        
+        # 显示剩余次数
         remaining = get_user_remaining_trials(st.session_state.user_id)
         if remaining == -1:
             if lang == "zh":
