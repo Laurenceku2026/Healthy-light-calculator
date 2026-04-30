@@ -17,14 +17,158 @@ st.set_page_config(page_title="健康光计算器 (EML / m-EDI)", layout="wide")
 KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 EML_CONSTANT = 72983.25  # = KM * 106.857，简化公式常数
 
+# ==================== Supabase 配置 ====================
+try:
+    SUPABASE_URL = st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = st.secrets["SUPABASE_SERVICE_ROLE_KEY"]
+except KeyError as e:
+    st.error(f"""
+    ❌ **配置错误：缺少 Supabase 密钥**
+    
+    请确保在 Streamlit Cloud 的 Secrets 中配置了：
+    - `SUPABASE_URL`
+    - `SUPABASE_SERVICE_ROLE_KEY`
+    
+    当前缺失的密钥: `{e.args[0]}`
+    """)
+    st.stop()
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json"
+}
+
+def supabase_get(table: str, user_id: str = None, id_field: str = "id"):
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    if user_id:
+        url += f"?{id_field}=eq.{user_id}"
+    response = requests.get(url, headers=HEADERS)
+    return response
+
+def supabase_patch(table: str, user_id: str, data: dict):
+    url = f"{SUPABASE_URL}/rest/v1/{table}?id=eq.{user_id}"
+    response = requests.patch(url, headers=HEADERS, json=data)
+    return response
+
+def supabase_post(table: str, data: dict):
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    response = requests.post(url, headers=HEADERS, json=data)
+    return response
+
+def get_user_profile(user_id: str):
+    if not user_id or user_id == "admin":
+        return {"subscription_tier": "free", "free_trials_remaining": 30, "subscription_expires_at": None}
+    try:
+        response = supabase_get("profiles", user_id)
+        if response.status_code == 200 and response.json():
+            data = response.json()[0]
+            return {
+                "subscription_tier": data.get("subscription_tier", "free"),
+                "free_trials_remaining": data.get("free_trials_remaining", 30),
+                "subscription_expires_at": data.get("subscription_expires_at")
+            }
+    except Exception:
+        pass
+    return {"subscription_tier": "free", "free_trials_remaining": 30, "subscription_expires_at": None}
+
+def get_user_remaining_trials(user_id: str) -> int:
+    try:
+        response = supabase_get("profiles", user_id)
+        if response.status_code == 200 and response.json():
+            remaining = response.json()[0].get("free_trials_remaining", 30)
+            tier = response.json()[0].get("subscription_tier", "free")
+            if tier == "pro":
+                return -1
+            return remaining
+    except Exception:
+        pass
+    return st.session_state.get("trials_left", 30)
+
+def consume_trial(user_id: str, app_name: str) -> tuple:
+    try:
+        resp = supabase_get("profiles", user_id)
+        if resp.status_code != 200 or not resp.json():
+            return False, 0, "用户不存在"
+        
+        current = resp.json()[0].get("free_trials_remaining", 30)
+        tier = resp.json()[0].get("subscription_tier", "free")
+        
+        if tier == "pro":
+            return True, -1, ""
+        
+        if current <= 0:
+            return False, 0, "免费次数已用完（共30次），请联系管理员升级"
+        
+        patch_resp = supabase_patch("profiles", user_id, {"free_trials_remaining": current - 1})
+        
+        if patch_resp.status_code not in [200, 204]:
+            return False, 0, f"更新失败: {patch_resp.text}"
+        
+        supabase_post("usage_logs", {
+            "user_id": user_id,
+            "app_name": app_name,
+            "analysis_count": 1,
+            "used_at": datetime.now().isoformat()
+        })
+        
+        return True, current - 1, ""
+        
+    except Exception as e:
+        return False, 0, f"计数失败: {str(e)}"
+
+# ==================== 接收门户参数 ====================
+query_params = st.query_params
+
+if "user_id" in query_params:
+    user_id_val = query_params["user_id"]
+    if isinstance(user_id_val, list):
+        st.session_state.user_id = user_id_val[0]
+    else:
+        st.session_state.user_id = user_id_val
+    
+    email_val = query_params.get("email", "")
+    if isinstance(email_val, list):
+        st.session_state.user_email = email_val[0] if email_val else ""
+    else:
+        st.session_state.user_email = email_val
+    
+    if st.session_state.user_email and "@" in st.session_state.user_email:
+        st.session_state.username = st.session_state.user_email.split('@')[0]
+    else:
+        st.session_state.username = "User"
+    
+    if "lang" in query_params:
+        lang_val = query_params["lang"]
+        if isinstance(lang_val, list):
+            lang_val = lang_val[0]
+        st.session_state.lang = lang_val if lang_val in ["zh", "en"] else "zh"
+    else:
+        st.session_state.lang = "zh"
+else:
+    st.warning("请从 TechLife Suite 门户登录后访问")
+    st.stop()
+
+# ==================== 侧边栏显示用户信息 ====================
+with st.sidebar:
+    remaining = get_user_remaining_trials(st.session_state.user_id)
+    lang = st.session_state.lang
+    if remaining == -1:
+        if lang == "zh":
+            st.info(f"🎫 剩余免费次数: ∞ (专业版)")
+        else:
+            st.info(f"🎫 Remaining Trials: ∞ (Pro)")
+    else:
+        if lang == "zh":
+            st.info(f"🎫 剩余免费次数: {remaining}")
+        else:
+            st.info(f"🎫 Remaining Trials: {remaining}")
+    st.markdown("---")
+
 # ==================== 数据文件路径 ====================
 SPECTRAL_DATA_FILE = "spectral_data.json"
 
 # ==================== 正确的预设数据（CIE S 026:2018 标准）====================
-# 波长范围: 380-780nm, 步长 5nm, 共 81 个点
-# V(λ) 峰值: 555 nm = 1.0000
-# Nz(λ) 峰值: 490 nm = 1.0000
-
 DEFAULT_WAVELENGTHS = list(range(380, 781, 5))
 
 # V(λ) 明视觉数据（CIE S 026:2018 标准，峰值 555nm = 1.0）
@@ -87,10 +231,6 @@ def reset_to_default():
 
 # ==================== 插值函数 ====================
 def interpolate_to_standard_grid(x_input, y_input, x_standard):
-    """
-    线性插值 - 将任意步长的数据插值到标准网格
-    超出输入范围的波长自动补 0
-    """
     x_input = np.asarray(x_input)
     y_input = np.asarray(y_input)
     x_standard = np.asarray(x_standard)
@@ -101,12 +241,10 @@ def interpolate_to_standard_grid(x_input, y_input, x_standard):
     return np.interp(x_standard, x_input, y_input, left=0, right=0)
 
 def interpolate_user_spectrum(wavelengths, power, std_wavelengths):
-    """用户光谱插值到标准网格，缺失部分补 0"""
     return interpolate_to_standard_grid(wavelengths, power, std_wavelengths)
 
 # ==================== 积分函数 ====================
 def trapezoid(y, x):
-    """梯形积分"""
     y = np.asarray(y)
     x = np.asarray(x)
     
@@ -127,16 +265,13 @@ def trapezoid(y, x):
 
 # ==================== EML 计算 ====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, std_wavelengths, v_lambda, nz_lambda):
-    """计算 EML 和 m-EDI"""
     spectrum = np.asarray(spectrum_w_m2_nm)
     
-    # EML 计算: 72983.25 * ∫ E(λ) * Nz(λ) dλ
     weighted_melanopic = spectrum * nz_lambda
     integral_nz = trapezoid(weighted_melanopic, std_wavelengths)
     eml = EML_CONSTANT * integral_nz
     medi = eml * 0.9063
     
-    # 照度计算: Km * ∫ E(λ) * V(λ) dλ
     weighted_photopic = spectrum * v_lambda
     integral_v = trapezoid(weighted_photopic, std_wavelengths)
     illuminance = KM * integral_v
@@ -145,7 +280,6 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, std_wavelengths, v_lambda, nz_lambd
 
 # ==================== 解析用户光谱 ====================
 def parse_user_spectrum(text):
-    """解析用户输入的光谱数据"""
     try:
         lines = text.strip().split('\n')
         wavelengths = []
@@ -174,7 +308,6 @@ def parse_user_spectrum(text):
         wavelengths = np.array(wavelengths)
         powers = np.array(powers)
         
-        # 按波长排序
         sort_idx = np.argsort(wavelengths)
         wavelengths = wavelengths[sort_idx]
         powers = powers[sort_idx]
@@ -260,7 +393,6 @@ def admin_dialog():
             mode='lines', name='Nz(λ) 黑视素',
             line=dict(color='blue', width=2)
         ))
-        # 标记峰值位置
         v_peak_idx = np.argmax(dataframe['V(λ) 明视觉'].values)
         nz_peak_idx = np.argmax(dataframe['Nz(λ) 黑视素'].values)
         fig.add_vline(x=dataframe['波长 (nm)'].iloc[v_peak_idx], line_dash="solid", line_color="red", opacity=0.5)
@@ -274,7 +406,6 @@ def admin_dialog():
         )
         return fig
     
-    # 数据编辑表格
     st.subheader("📊 光谱数据编辑")
     st.caption("💡 提示：波长列可编辑，支持任意步长。保存时会自动插值到 5nm 标准网格。")
     st.caption("📌 标准数据：V(λ) 峰值应在 555nm，Nz(λ) 峰值应在 490nm")
@@ -287,15 +418,12 @@ def admin_dialog():
         key="admin_data_editor"
     )
     
-    # 实时更新图表
     chart_placeholder.plotly_chart(update_chart(edited_df), use_container_width=True)
     
-    # 批量操作
     st.subheader("📁 批量操作")
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # 下载模板
         template_df = pd.DataFrame({
             '波长 (nm)': DEFAULT_WAVELENGTHS,
             'V(λ) 明视觉': DEFAULT_V_LAMBDA,
@@ -311,7 +439,6 @@ def admin_dialog():
         )
     
     with col2:
-        # 上传文件
         uploaded_file = st.file_uploader(
             "📤 上传 CSV/Excel",
             type=["csv", "xlsx"],
@@ -325,7 +452,6 @@ def admin_dialog():
                 else:
                     upload_df = pd.read_excel(uploaded_file)
                 
-                # 查找列名
                 wavelength_col = None
                 v_col = None
                 nz_col = None
@@ -361,23 +487,19 @@ def admin_dialog():
             st.success("已重置为 CIE S026 标准数据")
             st.rerun()
     
-    # 保存按钮
     st.markdown("---")
     col_save, col_cancel = st.columns(2)
     
     with col_save:
         if st.button("💾 保存到系统", type="primary", use_container_width=True):
-            # 获取编辑后的数据
             wavelengths = edited_df['波长 (nm)'].tolist()
             v_lambda = edited_df['V(λ) 明视觉'].tolist()
             nz_lambda = edited_df['Nz(λ) 黑视素'].tolist()
             
-            # 插值到 5nm 标准网格
             std_wavelengths = list(range(380, 781, 5))
             v_interp = interpolate_to_standard_grid(wavelengths, v_lambda, std_wavelengths)
             nz_interp = interpolate_to_standard_grid(wavelengths, nz_lambda, std_wavelengths)
             
-            # 保存
             save_spectral_data(std_wavelengths, v_interp.tolist(), nz_interp.tolist())
             st.success("✅ 数据已保存！应用将使用新数据进行计算")
             st.info("📌 请关闭此对话框后重新计算")
@@ -632,7 +754,7 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 <div class="rating-badge">{rating_text}</div>
 
 <h2>{t['well_comparison_title']}</h2>
-<table>
+</table>
     <thead><tr><th>{t['well_table_header']}</th><th>{t['well_eml_requirement']}</th><th>{t['well_status']}</th></tr></thead>
     <tbody>{well_rows}</tbody>
 </table>
@@ -656,10 +778,6 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 
 # ==================== 主应用 ====================
 def main():
-    # 初始化语言
-    if 'lang' not in st.session_state:
-        st.session_state.lang = "zh"
-    
     lang = st.session_state.lang
     t = TEXTS[lang]
     
@@ -685,8 +803,10 @@ def main():
     
     st.markdown(t['page_subtitle'])
     
-    # 侧边栏
+    # 侧边栏 - 关于系统和分析人信息
     with st.sidebar:
+        # 用户信息已在上方显示
+        st.markdown("---")
         st.header(t['about_system'])
         st.markdown(t['about_text'])
         st.markdown("---")
@@ -716,133 +836,125 @@ def main():
     st.caption(t['unit_note'])
     
     if st.button(t['calc_btn'], type="primary", use_container_width=True):
-        wl_input, power_input = None, None
-        
-        if uploaded_file is not None:
-            text_data = uploaded_file.getvalue().decode("utf-8")
-            wl_input, power_input = parse_user_spectrum(text_data)
-        elif spectrum_text:
-            wl_input, power_input = parse_user_spectrum(spectrum_text)
+        # 消耗免费次数
+        allowed, new_remaining, error_msg = consume_trial(st.session_state.user_id, "eml_calculator")
+        if not allowed:
+            st.error(error_msg)
         else:
-            st.warning(t['warning_input'])
-        
-        if wl_input is not None and power_input is not None and len(wl_input) >= 2:
-            # 检测输入数据
-            step_in = np.mean(np.diff(wl_input))
-            input_min, input_max = wl_input[0], wl_input[-1]
-            st.info(t['detected'].format(input_min, input_max, step_in, len(wl_input)))
+            wl_input, power_input = None, None
             
-            # 加载光谱数据
-            std_wavelengths, v_lambda, nz_lambda = load_spectral_data()
-            
-            # 插值用户光谱到标准网格
-            interp_spectrum = interpolate_user_spectrum(wl_input, power_input, std_wavelengths)
-            
-            # 计算 EML
-            eml, medi, lux = calculate_eml_and_medi(interp_spectrum, std_wavelengths, v_lambda, nz_lambda)
-            well_results = get_well_comparison(eml)
-            
-            # 显示结果
-            st.subheader(t['result_title'])
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(t['eml_label'], f"{eml:.1f} lx")
-            with col2:
-                st.metric(t['medi_label'], f"{medi:.1f} lx", delta=t['medi_delta'])
-            with col3:
-                st.metric(t['lux_label'], f"{lux:.1f} lx")
-            
-            # 健康评级
-            if eml >= 250:
-                st.success(t['rating_excellent'])
-            elif eml >= 150:
-                st.info(t['rating_good'])
-            elif eml <= 50:
-                st.info(t['rating_night'])
+            if uploaded_file is not None:
+                text_data = uploaded_file.getvalue().decode("utf-8")
+                wl_input, power_input = parse_user_spectrum(text_data)
+            elif spectrum_text:
+                wl_input, power_input = parse_user_spectrum(spectrum_text)
             else:
-                st.warning(t['rating_moderate'])
+                st.warning(t['warning_input'])
             
-            # WELL 对比
-            st.subheader(t['well_comparison_title'])
-            well_df = pd.DataFrame([
-                {t['well_table_header']: (r['name_zh'] if lang == 'zh' else r['name_en']),
-                 t['well_eml_requirement']: f"≥ {r['eml_min']} lx",
-                 t['well_status']: "✅ " + t['well_meet'] if r['eml_met'] else "❌ " + t['well_not_meet']}
-                for r in well_results
-            ])
-            st.table(well_df)
-            
-            if eml < 150:
-                st.warning("⚠️ 当前 EML 值低于 WELL 基础达标要求 (≥150 lx)")
-            elif eml >= 250:
-                st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
-            
-            # 光谱可视化
-            st.subheader(t['vis_title'])
-            
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=wl_input, y=power_input, 
-                mode='markers', name=t['vis_original'].format(step_in),
-                marker=dict(color='orange', size=6, symbol='circle')
-            ))
-            fig.add_trace(go.Scatter(
-                x=std_wavelengths, y=interp_spectrum, 
-                mode='lines', name=t['vis_interp'],
-                line=dict(color='darkblue', width=2)
-            ))
-            
-            # V(λ) 明视觉光谱（缩放显示）
-            v_max = max(v_lambda)
-            if v_max > 0 and max(interp_spectrum) > 0:
-                v_scaled = np.array(v_lambda) / v_max * max(interp_spectrum) * 0.6
+            if wl_input is not None and power_input is not None and len(wl_input) >= 2:
+                step_in = np.mean(np.diff(wl_input))
+                input_min, input_max = wl_input[0], wl_input[-1]
+                st.info(t['detected'].format(input_min, input_max, step_in, len(wl_input)))
+                
+                std_wavelengths, v_lambda, nz_lambda = load_spectral_data()
+                interp_spectrum = interpolate_user_spectrum(wl_input, power_input, std_wavelengths)
+                
+                eml, medi, lux = calculate_eml_and_medi(interp_spectrum, std_wavelengths, v_lambda, nz_lambda)
+                well_results = get_well_comparison(eml)
+                
+                st.subheader(t['result_title'])
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(t['eml_label'], f"{eml:.1f} lx")
+                with col2:
+                    st.metric(t['medi_label'], f"{medi:.1f} lx", delta=t['medi_delta'])
+                with col3:
+                    st.metric(t['lux_label'], f"{lux:.1f} lx")
+                
+                if eml >= 250:
+                    st.success(t['rating_excellent'])
+                elif eml >= 150:
+                    st.info(t['rating_good'])
+                elif eml <= 50:
+                    st.info(t['rating_night'])
+                else:
+                    st.warning(t['rating_moderate'])
+                
+                st.subheader(t['well_comparison_title'])
+                well_df = pd.DataFrame([
+                    {t['well_table_header']: (r['name_zh'] if lang == 'zh' else r['name_en']),
+                     t['well_eml_requirement']: f"≥ {r['eml_min']} lx",
+                     t['well_status']: "✅ " + t['well_meet'] if r['eml_met'] else "❌ " + t['well_not_meet']}
+                    for r in well_results
+                ])
+                st.table(well_df)
+                
+                if eml < 150:
+                    st.warning("⚠️ 当前 EML 值低于 WELL 基础达标要求 (≥150 lx)")
+                elif eml >= 250:
+                    st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
+                
+                st.subheader(t['vis_title'])
+                
+                fig = go.Figure()
                 fig.add_trace(go.Scatter(
-                    x=std_wavelengths, y=v_scaled, 
-                    mode='lines', name=t['vis_vlambda'],
-                    line=dict(color='red', dash='dot', width=2)
+                    x=wl_input, y=power_input, 
+                    mode='markers', name=t['vis_original'].format(step_in),
+                    marker=dict(color='orange', size=6, symbol='circle')
                 ))
-            
-            # 有效节律光谱
-            nz_weighted = interp_spectrum * nz_lambda
-            if max(nz_weighted) > 0:
                 fig.add_trace(go.Scatter(
-                    x=std_wavelengths, y=nz_weighted, 
-                    mode='lines', name=t['vis_weighted'],
-                    line=dict(color='green', dash='dash', width=2)
+                    x=std_wavelengths, y=interp_spectrum, 
+                    mode='lines', name=t['vis_interp'],
+                    line=dict(color='darkblue', width=2)
                 ))
-            
-            fig.update_layout(
-                title=t['chart_title'],
-                xaxis_title=t['chart_xlabel'],
-                yaxis_title=t['chart_ylabel'],
-                legend_title="Spectrum Type",
-                template="plotly_white",
-                hovermode='x unified',
-                height=500
-            )
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # 数据处理说明
-            with st.expander(t['data_note_title']):
-                st.markdown(t['data_note_content'].format(len(wl_input), input_min, input_max, step_in))
-                st.markdown(f"标准网格: 380-780 nm，固定步长 5 nm（共 {len(std_wavelengths)} 个点）")
-                st.markdown("插值方法: 线性插值，超出范围自动补 0")
-            
-            # 导出报告
-            fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
-            report_data = generate_word_report(
-                t, analyst_name, analyst_title, eml, medi, lux, 
-                well_results, fig_html, input_min, input_max, step_in, len(wl_input)
-            )
-            st.download_button(
-                label=t['export_btn'],
-                data=report_data,
-                file_name=f"EML_Report_{datetime.now().strftime('%Y%m%d')}.doc",
-                mime="application/msword",
-                use_container_width=True
-            )
-        else:
-            st.error(t['error_parse'])
+                
+                v_max = max(v_lambda)
+                if v_max > 0 and max(interp_spectrum) > 0:
+                    v_scaled = np.array(v_lambda) / v_max * max(interp_spectrum) * 0.6
+                    fig.add_trace(go.Scatter(
+                        x=std_wavelengths, y=v_scaled, 
+                        mode='lines', name=t['vis_vlambda'],
+                        line=dict(color='red', dash='dot', width=2)
+                    ))
+                
+                nz_weighted = interp_spectrum * nz_lambda
+                if max(nz_weighted) > 0:
+                    fig.add_trace(go.Scatter(
+                        x=std_wavelengths, y=nz_weighted, 
+                        mode='lines', name=t['vis_weighted'],
+                        line=dict(color='green', dash='dash', width=2)
+                    ))
+                
+                fig.update_layout(
+                    title=t['chart_title'],
+                    xaxis_title=t['chart_xlabel'],
+                    yaxis_title=t['chart_ylabel'],
+                    legend_title="Spectrum Type",
+                    template="plotly_white",
+                    hovermode='x unified',
+                    height=500
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                with st.expander(t['data_note_title']):
+                    st.markdown(t['data_note_content'].format(len(wl_input), input_min, input_max, step_in))
+                    st.markdown(f"标准网格: 380-780 nm，固定步长 5 nm（共 {len(std_wavelengths)} 个点）")
+                    st.markdown("插值方法: 线性插值，超出范围自动补 0")
+                
+                fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
+                report_data = generate_word_report(
+                    t, analyst_name, analyst_title, eml, medi, lux, 
+                    well_results, fig_html, input_min, input_max, step_in, len(wl_input)
+                )
+                st.download_button(
+                    label=t['export_btn'],
+                    data=report_data,
+                    file_name=f"EML_Report_{datetime.now().strftime('%Y%m%d')}.doc",
+                    mime="application/msword",
+                    use_container_width=True
+                )
+            else:
+                st.error(t['error_parse'])
     
     st.divider()
     st.caption(t['footer'])
