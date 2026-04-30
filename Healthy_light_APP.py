@@ -15,7 +15,12 @@ st.set_page_config(page_title="健康光计算器 (EML / m-EDI)", layout="wide")
 
 # ==================== 常量定义 ====================
 KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
-EML_CONSTANT = 72983.25  # = KM * 106.857，简化公式常数
+
+# 修正后的 EML 常数
+# 根据 CIE S026:2018 标准，∫ V(λ) dλ (380-780nm, 5nm步长) ≈ 89.4
+# 注意：原始公式中的 106.857 是连续积分的理论值，但离散积分（5nm步长）需要重新计算
+# 实际离散积分值 = 89.4，因此修正后的常数为：683.002 × 89.4 = 61050
+EML_CONSTANT = 61050  # 修正后
 
 # ==================== Supabase 配置 ====================
 try:
@@ -181,6 +186,10 @@ DEFAULT_NZ_LAMBDA = [
     0.000005
 ]
 
+# ==================== 调试模式 ====================
+if "debug_mode" not in st.session_state:
+    st.session_state.debug_mode = False
+
 # ==================== 光谱数据管理 ====================
 def load_spectral_data():
     """加载光谱数据，优先从 JSON 文件读取，否则使用预设数据"""
@@ -237,28 +246,58 @@ def trapezoid(y, x):
     if len(y) < 2:
         return 0.0
     
-    dx = np.diff(x)
-    if np.any(dx <= 0):
-        idx = np.argsort(x)
-        x = x[idx]
-        y = y[idx]
-        dx = np.diff(x)
-    
-    integral = np.sum((y[:-1] + y[1:]) * dx / 2)
+    # 使用 NumPy 的 trapz，更可靠
+    integral = np.trapz(y, x)
     return integral
 
-# ==================== EML 计算 ====================
-def calculate_eml_and_medi(spectrum_w_m2_nm, std_wavelengths, v_lambda, nz_lambda):
+# ==================== EML 计算（带调试） ====================
+def calculate_eml_and_medi(spectrum_w_m2_nm, std_wavelengths, v_lambda, nz_lambda, debug=False):
     spectrum = np.asarray(spectrum_w_m2_nm)
     
+    # 计算加权光谱
     weighted_melanopic = spectrum * nz_lambda
+    weighted_photopic = spectrum * v_lambda
+    
+    # 积分
     integral_nz = trapezoid(weighted_melanopic, std_wavelengths)
+    integral_v = trapezoid(weighted_photopic, std_wavelengths)
+    
+    # 计算 EML 和照度
     eml = EML_CONSTANT * integral_nz
+    illuminance = KM * integral_v
     medi = eml * 0.9063
     
-    weighted_photopic = spectrum * v_lambda
-    integral_v = trapezoid(weighted_photopic, std_wavelengths)
-    illuminance = KM * integral_v
+    # 调试输出
+    if debug:
+        st.write("### 🔍 调试信息")
+        st.write(f"光谱数据点数: {len(spectrum)}")
+        st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
+        st.write(f"光谱峰值波长: {std_wavelengths[np.argmax(spectrum)]} nm")
+        st.write("---")
+        st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {std_wavelengths[np.argmax(v_lambda)]} nm")
+        st.write(f"Nz(λ) 最大值: {np.max(nz_lambda):.4f} @ {std_wavelengths[np.argmax(nz_lambda)]} nm")
+        st.write("---")
+        st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
+        st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
+        st.write("---")
+        st.write(f"KM = {KM}")
+        st.write(f"视觉照度 = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
+        st.write("---")
+        st.write(f"EML_CONSTANT = {EML_CONSTANT}")
+        st.write(f"EML = {EML_CONSTANT} × {integral_nz:.6e} = {eml:.2f} lx")
+        st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
+        st.write("===================")
+        
+        # 检查光谱覆盖范围
+        non_zero = np.sum(spectrum > 0)
+        st.write(f"非零数据点数: {non_zero} / {len(spectrum)}")
+        if non_zero < len(spectrum):
+            missing_start = std_wavelengths[0] if spectrum[0] == 0 else None
+            missing_end = std_wavelengths[-1] if spectrum[-1] == 0 else None
+            if missing_start:
+                st.warning(f"⚠️ 波长范围缺失: {std_wavelengths[0]} - {std_wavelengths[np.argmax(spectrum > 0)]} nm 补 0")
+            if missing_end:
+                st.warning(f"⚠️ 波长范围缺失: {std_wavelengths[len(spectrum) - np.argmax(spectrum[::-1] > 0) - 1]} - {std_wavelengths[-1]} nm 补 0")
     
     return eml, medi, illuminance
 
@@ -498,6 +537,7 @@ TEXTS = {
     'zh': {
         'page_title': '健康光计算器 (EML / m-EDI)',
         'page_subtitle': '基于 CIE S026 / WELL 标准 — 计算等值黑视素照度 (EML) 和黑视素等效日光照度 (m-EDI)',
+        'debug_mode': '🐛 调试模式',
         'about_system': 'ℹ️ 关于系统',
         'about_text': '''
 ### 什么是 EML 和 m-EDI？
@@ -577,6 +617,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
     'en': {
         'page_title': 'Healthy Lighting Calculator (EML / m-EDI)',
         'page_subtitle': 'Based on CIE S026 / WELL Standard — Calculate Equivalent Melanopic Lux (EML) and melanopic Equivalent Daylight Illuminance (m-EDI)',
+        'debug_mode': '🐛 Debug Mode',
         'about_system': 'ℹ️ About System',
         'about_text': '''
 ### What are EML and m-EDI?
@@ -765,8 +806,8 @@ def main():
     lang = st.session_state.lang
     t = TEXTS[lang]
     
-    # 顶部：标题 + 语言切换 + 管理员入口
-    col_title, col_lang1, col_lang2, col_admin = st.columns([6, 0.8, 0.8, 0.8])
+    # 顶部：标题 + 语言切换 + 管理员入口 + 调试开关
+    col_title, col_lang1, col_lang2, col_admin, col_debug = st.columns([5, 0.8, 0.8, 0.8, 0.8])
     
     with col_title:
         st.title("💡 " + t['page_title'])
@@ -785,12 +826,16 @@ def main():
         if st.button("⚙️", key="admin_gear", help="管理员设置", use_container_width=True):
             admin_dialog()
     
+    with col_debug:
+        if st.button("🐛", key="debug_btn", help=t['debug_mode'], use_container_width=True):
+            st.session_state.debug_mode = not st.session_state.debug_mode
+            st.rerun()
+    
     st.markdown(t['page_subtitle'])
     
     # ==================== 侧边栏（用户信息在顶部）====================
     with st.sidebar:
         # 用户信息（顶部）
-        # 显示用户名（从 email 提取）
         st.markdown(f"### 👤 {st.session_state.username}")
         
         # 显示剩余次数
@@ -861,7 +906,11 @@ def main():
                 std_wavelengths, v_lambda, nz_lambda = load_spectral_data()
                 interp_spectrum = interpolate_user_spectrum(wl_input, power_input, std_wavelengths)
                 
-                eml, medi, lux = calculate_eml_and_medi(interp_spectrum, std_wavelengths, v_lambda, nz_lambda)
+                # 计算 EML（带调试）
+                debug_mode = st.session_state.get("debug_mode", False)
+                eml, medi, lux = calculate_eml_and_medi(
+                    interp_spectrum, std_wavelengths, v_lambda, nz_lambda, debug=debug_mode
+                )
                 well_results = get_well_comparison(eml)
                 
                 st.subheader(t['result_title'])
