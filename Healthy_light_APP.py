@@ -212,8 +212,8 @@ def trapezoid(y, x):
 # ==================== 光谱数据管理（自动修正 V(λ) 积分值）====================
 def load_spectral_data(debug=False):
     """
-    加载光谱数据，自动检测并修正 V(λ) 的积分值
-    确保 V(λ) 在 5nm 离散网格上的积分值为标准值 89.4
+    加载光谱数据
+    V(λ) 峰值保持为 1.0，不进行缩放
     """
     if os.path.exists(SPECTRAL_DATA_FILE):
         try:
@@ -227,25 +227,30 @@ def load_spectral_data(debug=False):
         v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
     
     # 转换为 numpy 数组
-    wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     v_array = np.asarray(v_lambda)
     nz_array = np.asarray(nz_lambda)
     
-    # 计算当前 V(λ) 离散积分值
-    current_integral = trapezoid(v_array, wavelengths)
-    
-    # 如果偏差超过 5%，自动修正
-    if abs(current_integral - TARGET_INTEGRAL_V) > 4.5:
-        scale_factor = TARGET_INTEGRAL_V / current_integral
-        v_lambda = (v_array * scale_factor).tolist()
+    # 确保 V(λ) 峰值归一化到 1.0（物理定义）
+    v_max = np.max(v_array)
+    if abs(v_max - 1.0) > 0.01:
         if debug:
-            st.info(f"🔧 V(λ) 自动修正: 积分 {current_integral:.2f} → {TARGET_INTEGRAL_V:.2f} (因子 {scale_factor:.4f})")
+            st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
+        v_lambda = (v_array / v_max).tolist()
+        v_array = np.asarray(v_lambda)
     
-    # 确保 Nz(λ) 峰值在 490nm 附近
-    nz_peak_idx = np.argmax(nz_array)
-    nz_peak_wl = wavelengths[nz_peak_idx]
-    if debug and nz_peak_wl not in [485, 490, 495]:
-        st.warning(f"⚠️ Nz(λ) 峰值在 {nz_peak_wl} nm，标准应在 490nm 附近")
+    # 确保 Nz(λ) 峰值归一化到 1.0
+    nz_max = np.max(nz_array)
+    if abs(nz_max - 1.0) > 0.01:
+        if debug:
+            st.warning(f"⚠️ Nz(λ) 峰值 {nz_max:.4f}，自动归一化到 1.0")
+        nz_lambda = (nz_array / nz_max).tolist()
+    
+    if debug:
+        wavelengths = np.asarray(STANDARD_WAVELENGTHS)
+        integral_v = trapezoid(v_array, wavelengths)
+        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
+        st.info(f"📊 V(λ) 积分值: {integral_v:.4f} (5nm 离散网格)")
+        st.info(f"📊 Nz(λ) 峰值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
     
     return v_lambda, nz_lambda
 
