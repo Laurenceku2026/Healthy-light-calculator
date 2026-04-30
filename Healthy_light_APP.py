@@ -18,9 +18,8 @@ KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 
 # 修正后的 EML 常数
 # 根据 CIE S026:2018 标准，∫ V(λ) dλ (380-780nm, 5nm步长) ≈ 89.4
-# 注意：原始公式中的 106.857 是连续积分的理论值，但离散积分（5nm步长）需要重新计算
-# 实际离散积分值 = 89.4，因此修正后的常数为：683.002 × 89.4 = 61050
-EML_CONSTANT = 61050  # 修正后
+# 修正后的常数为：683.002 × 89.4 = 61050
+EML_CONSTANT = 61050
 
 # ==================== Supabase 配置 ====================
 try:
@@ -236,8 +235,9 @@ def interpolate_to_standard_grid(x_input, y_input, x_standard):
 def interpolate_user_spectrum(wavelengths, power, std_wavelengths):
     return interpolate_to_standard_grid(wavelengths, power, std_wavelengths)
 
-# ==================== 积分函数 ====================
+# ==================== 积分函数（兼容新旧 NumPy）====================
 def trapezoid(y, x):
+    """梯形积分，兼容新旧 NumPy 版本"""
     y = np.asarray(y)
     x = np.asarray(x)
     
@@ -246,9 +246,23 @@ def trapezoid(y, x):
     if len(y) < 2:
         return 0.0
     
-    # 使用 NumPy 的 trapz，更可靠
-    integral = np.trapz(y, x)
-    return integral
+    # NumPy 1.9+ 使用 np.trapz，新版本使用 np.trapezoid
+    try:
+        # 尝试新版本
+        return np.trapezoid(y, x)
+    except AttributeError:
+        try:
+            # 回退到旧版本
+            return np.trapz(y, x)
+        except AttributeError:
+            # 手动实现
+            dx = np.diff(x)
+            if np.any(dx <= 0):
+                idx = np.argsort(x)
+                x = x[idx]
+                y = y[idx]
+                dx = np.diff(x)
+            return np.sum((y[:-1] + y[1:]) * dx / 2)
 
 # ==================== EML 计算（带调试） ====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, std_wavelengths, v_lambda, nz_lambda, debug=False):
@@ -298,6 +312,7 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, std_wavelengths, v_lambda, nz_lambd
                 st.warning(f"⚠️ 波长范围缺失: {std_wavelengths[0]} - {std_wavelengths[np.argmax(spectrum > 0)]} nm 补 0")
             if missing_end:
                 st.warning(f"⚠️ 波长范围缺失: {std_wavelengths[len(spectrum) - np.argmax(spectrum[::-1] > 0) - 1]} - {std_wavelengths[-1]} nm 补 0")
+        st.write("===================")
     
     return eml, medi, illuminance
 
