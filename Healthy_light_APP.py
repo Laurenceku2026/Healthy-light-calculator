@@ -1003,36 +1003,50 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                # 双 Y 轴光谱可视化
+                                # 双 Y 轴光谱可视化
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
+                
+                # 1. 原始数据（散点图，左 Y 轴）
                 fig.add_trace(go.Scatter(
                     x=wl_input, y=power_input, 
-                    mode='markers', name=t['vis_original'].format(step_in),
+                    mode='markers', 
+                    name=t['vis_original'].format(step_in),
                     marker=dict(color='orange', size=6, symbol='circle')
                 ))
+                
+                # 2. 插值后光谱（左 Y 轴）
                 fig.add_trace(go.Scatter(
                     x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
-                    mode='lines', name=t['vis_interp'],
+                    mode='lines', 
+                    name=t['vis_interp'],
                     line=dict(color='#1f77b4', width=2.5)
                 ))
+                
+                # 3. 有效节律光谱 SPD × Nz(λ)（左 Y 轴）
                 nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
                     fig.add_trace(go.Scatter(
                         x=STANDARD_WAVELENGTHS, y=nz_weighted, 
-                        mode='lines', name=t['vis_weighted'],
+                        mode='lines', 
+                        name=t['vis_weighted'],
                         line=dict(color='#2ca02c', dash='dash', width=2)
                     ))
+                
+                # 4. 明视觉光谱 V(λ) - 使用右 Y 轴（归一化 0-1）
                 v_max_val = max(v_lambda)
                 if v_max_val > 0:
                     v_normalized = np.array(v_lambda) / v_max_val
                     fig.add_trace(go.Scatter(
                         x=STANDARD_WAVELENGTHS, y=v_normalized, 
-                        mode='lines', name=t['vis_vlambda'],
+                        mode='lines', 
+                        name=t['vis_vlambda'],
                         line=dict(color='#d62728', dash='dot', width=2.5),
                         yaxis="y2"
                     ))
+                
+                # 5. 更新布局 - 修复后的版本
                 fig.update_layout(
                     title=t['chart_title'],
                     xaxis_title=t['chart_xlabel'],
@@ -1040,18 +1054,25 @@ def main():
                     legend_title="Spectrum Type",
                     template="plotly_white",
                     hovermode='x unified',
-                    height=550,
-                    yaxis2=dict(
-                        title="明视觉灵敏度 V(λ) (归一化)",
-                        overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        range=[0, 1.05],
-                        titlefont=dict(color="#d62728"),
-                        tickfont=dict(color="#d62728")
-                    )
+                    height=550
                 )
-                fig.update_yaxes(titlefont=dict(color="#1f77b4"), tickfont=dict(color="#1f77b4"))
+                
+                # 单独设置 yaxis2（右 Y 轴）
+                fig.update_layout(
+                    yaxis2={
+                        "title": "明视觉灵敏度 V(λ) (归一化)",
+                        "overlaying": "y",
+                        "side": "right",
+                        "showgrid": False,
+                        "range": [0, 1.05],
+                        "titlefont": {"color": "#d62728"},
+                        "tickfont": {"color": "#d62728"}
+                    }
+                )
+                
+                # 设置左 Y 轴颜色
+                fig.update_yaxes(titlefont_color="#1f77b4", tickfont_color="#1f77b4")
+                
                 st.plotly_chart(fig, use_container_width=True)
                 
                 with st.expander(t['data_note_title']):
