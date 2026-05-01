@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from io import StringIO
 import re
 import json
+import os
 from datetime import datetime
 import plotly.io as pio
 import requests
@@ -18,6 +19,10 @@ KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 # ==================== 标准网格定义 ====================
 STANDARD_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm，步长5nm
 STANDARD_DELTA = 5.0  # 标准网格步长 (nm)
+
+# ==================== 文件路径 ====================
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SPECTRAL_DATA_FILE = os.path.join(SCRIPT_DIR, "spectral_data.json")
 
 # ==================== Supabase 配置 ====================
 try:
@@ -151,7 +156,7 @@ else:
     st.warning("请从 TechLife Suite 门户登录后访问")
     st.stop()
 
-# ==================== 预设数据 ====================
+# ==================== 预设数据（CIE S 026:2018 标准）====================
 # V(λ) 明视觉数据（峰值 555nm = 1.0）
 DEFAULT_V_LAMBDA = [
     0.000039, 0.000064, 0.000120, 0.000217, 0.000396, 0.000640, 0.001210, 0.002180, 0.004000, 0.007300,
@@ -202,54 +207,87 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== 光谱数据管理（Supabase 存储）====================
+# ==================== 光谱数据管理（本地 JSON 文件 + 自动积分归一化）====================
 def load_spectral_data(debug=False):
-    """从 Supabase 加载光谱数据，否则使用预设数据"""
-    user_id = st.session_state.get("user_id", "")
-    if not user_id or user_id == "admin":
-        return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
-    
-    try:
-        response = supabase_get("profiles", user_id)
-        if response.status_code == 200 and response.json():
-            data = response.json()[0]
-            spectral_data = data.get("spectral_data")
-            if spectral_data:
-                import json
-                saved = json.loads(spectral_data)
-                v_lambda = saved.get('v_lambda', DEFAULT_V_LAMBDA)
-                nz_lambda = saved.get('nz_lambda', DEFAULT_NZ_LAMBDA)
-                if debug:
-                    st.info("📂 从数据库加载光谱数据")
-                return v_lambda, nz_lambda
-    except Exception as e:
+    """加载光谱数据，优先从 JSON 文件读取，否则使用预设数据，并自动积分归一化 Nz(λ)"""
+    if os.path.exists(SPECTRAL_DATA_FILE):
+        try:
+            with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                v_lambda = data.get('v_lambda', DEFAULT_V_LAMBDA)
+                nz_lambda = data.get('nz_lambda', DEFAULT_NZ_LAMBDA)
+            if debug:
+                st.info(f"📂 从文件加载数据: {SPECTRAL_DATA_FILE}")
+        except Exception as e:
+            if debug:
+                st.warning(f"加载失败，使用预设数据: {e}")
+            v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
+    else:
         if debug:
-            st.warning(f"加载失败: {e}")
+            st.info("📂 文件不存在，使用预设数据")
+        v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
     
-    return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
+    wavelengths = np.asarray(STANDARD_WAVELENGTHS)
+    
+    # V(λ)：峰值归一化到 1.0
+    v_array = np.asarray(v_lambda)
+    v_max = np.max(v_array)
+    if abs(v_max - 1.0) > 0.01:
+        if debug:
+            st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
+        v_lambda = (v_array / v_max).tolist()
+        v_array = np.asarray(v_lambda)
+    
+    # Nz(λ)：积分归一化到 1.0（CIE S026 标准）
+    nz_array = np.asarray(nz_lambda)
+    current_integral_nz = trapezoid(nz_array, wavelengths)
+    
+    if abs(current_integral_nz - 1.0) > 0.05:
+        scale_factor = 1.0 / current_integral_nz
+        nz_lambda = (nz_array * scale_factor).tolist()
+        if debug:
+            st.info(f"🔧 Nz(λ) 自动积分归一化: ∫Nz {current_integral_nz:.4f} → 1.0 (因子 {scale_factor:.4f})")
+    
+    # 检查 Nz(λ) 峰值位置
+    nz_array = np.asarray(nz_lambda)
+    nz_peak_idx = np.argmax(nz_array)
+    nz_peak_wl = wavelengths[nz_peak_idx]
+    if debug and (nz_peak_wl < 480 or nz_peak_wl > 500):
+        st.warning(f"⚠️ Nz(λ) 峰值在 {nz_peak_wl} nm，标准应在 480-500 nm")
+    
+    if debug:
+        v_array = np.asarray(v_lambda)
+        nz_array = np.asarray(nz_lambda)
+        integral_v = trapezoid(v_array, wavelengths)
+        integral_nz = trapezoid(nz_array, wavelengths)
+        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
+        st.info(f"📊 V(λ) 积分值: {integral_v:.4f}")
+        st.info(f"📊 Nz(λ) 峰值: {np.max(nz_array):.4f} @ {wavelengths[nz_peak_idx]} nm")
+        st.info(f"📊 Nz(λ) 积分值: {integral_nz:.4f}")
+    
+    return v_lambda, nz_lambda
 
 def save_spectral_data(v_lambda, nz_lambda):
-    """保存光谱数据到 Supabase"""
-    user_id = st.session_state.get("user_id", "")
-    if not user_id or user_id == "admin":
-        return False
-    
+    """保存光谱数据到 JSON 文件"""
     try:
-        import json
         data = {
             'v_lambda': [float(x) for x in v_lambda],
             'nz_lambda': [float(x) for x in nz_lambda],
             'last_updated': datetime.now().isoformat()
         }
-        response = supabase_patch("profiles", user_id, {"spectral_data": json.dumps(data)})
-        return response.status_code in [200, 204]
+        
+        with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        return True
     except Exception as e:
         print(f"保存失败: {e}")
         return False
 
 def reset_to_default():
     """重置为预设数据"""
-    save_spectral_data(DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA)
+    if os.path.exists(SPECTRAL_DATA_FILE):
+        os.remove(SPECTRAL_DATA_FILE)
     return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
 
 # ==================== 插值函数 ====================
@@ -611,7 +649,7 @@ def admin_dialog():
     
     # ========== 保存按钮 ==========
     st.markdown("---")
-    st.caption("💡 点击保存后数据将写入数据库")
+    st.caption("💡 点击保存后数据将写入本地文件")
     
     col_save, col_cancel = st.columns(2)
     
@@ -621,7 +659,7 @@ def admin_dialog():
             nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
             
             if save_spectral_data(v_lambda_save, nz_lambda_save):
-                st.success("✅ 数据已保存到系统！")
+                st.success("✅ 数据已保存到本地文件！")
                 st.balloons()
                 # 清除缓存，退出管理员模式
                 if "admin_df" in st.session_state:
@@ -675,9 +713,9 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'textarea_label': '选项 B: 粘贴或输入光谱数据',
         'textarea_placeholder': '波长(nm),功率(W/m²/nm)\\n380 0.0012\\n385 0.0021',
         'unit_note': '💡 单位说明：功率单位为 W/m²/nm（瓦每平方米每纳米）',
-        'target_illuminance': '🎯 目标照度 (lx)',
+        'enable_scaling': '🎯 启用自动缩放',
+        'target_illuminance': '目标照度 (lx)',
         'target_illuminance_help': '输入期望的照度值，系统将自动缩放光谱',
-        'scale_info': '💡 光谱将按比例缩放到目标照度',
         'calc_btn': '🚀 计算 EML / m-EDI',
         'result_title': '📊 计算结果',
         'eml_label': '等值黑视素照度 (EML)',
@@ -756,9 +794,9 @@ Where:
         'textarea_label': 'Option B: Paste or Enter Spectral Data',
         'textarea_placeholder': 'Wavelength(nm),Power(W/m²/nm)\\n380 0.0012\\n385 0.0021',
         'unit_note': '💡 Unit Note: Power unit is W/m²/nm',
-        'target_illuminance': '🎯 Target Illuminance (lx)',
+        'enable_scaling': '🎯 Enable Auto Scaling',
+        'target_illuminance': 'Target Illuminance (lx)',
         'target_illuminance_help': 'Enter desired illuminance, spectrum will be scaled automatically',
-        'scale_info': '💡 Spectrum will be scaled to target illuminance',
         'calc_btn': '🚀 Calculate EML / m-EDI',
         'result_title': '📊 Results',
         'eml_label': 'Equivalent Melanopic Lux (EML)',
@@ -983,20 +1021,23 @@ def main():
     spectrum_text = st.text_area(t['textarea_label'], height=150, placeholder=t['textarea_placeholder'])
     st.caption(t['unit_note'])
     
-    # 目标照度输入
-    col_target, col_scale_info = st.columns([1, 2])
-    with col_target:
-        target_illuminance = st.number_input(
-            t['target_illuminance'],
-            min_value=1.0,
-            max_value=100000.0,
-            value=100.0,
-            step=10.0,
-            key="target_illuminance_input",
-            help=t['target_illuminance_help']
-        )
-    with col_scale_info:
-        st.caption(t['scale_info'])
+    # 自动缩放选项
+    col_scale1, col_scale2 = st.columns([1, 2])
+    with col_scale1:
+        enable_scaling = st.checkbox(t['enable_scaling'], value=False, key="enable_scaling")
+    
+    target_illuminance = 100.0
+    if enable_scaling:
+        with col_scale2:
+            target_illuminance = st.number_input(
+                t['target_illuminance'],
+                min_value=1.0,
+                max_value=100000.0,
+                value=100.0,
+                step=10.0,
+                key="target_illuminance_input",
+                help=t['target_illuminance_help']
+            )
     
     if st.button(t['calc_btn'], type="primary", use_container_width=True):
         allowed, new_remaining, error_msg = consume_trial(st.session_state.user_id, "eml_calculator")
@@ -1023,16 +1064,22 @@ def main():
                 # 插值用户光谱到标准网格
                 interp_spectrum = interpolate_energy_conserving(wl_input, power_input, STANDARD_WAVELENGTHS)
                 
-                # 计算原始照度
-                current_illuminance = KM * trapezoid(interp_spectrum * np.asarray(v_lambda), STANDARD_WAVELENGTHS)
+                scaled_spectrum = interp_spectrum
+                scale_factor = 1.0
+                current_illuminance = None
                 
-                # 缩放光谱到目标照度
-                scale_factor = target_illuminance / current_illuminance if current_illuminance > 0 else 1.0
-                scaled_spectrum = interp_spectrum * scale_factor
-                
-                # 显示缩放信息
-                if abs(scale_factor - 1.0) > 0.01:
-                    st.info(f"🔧 光谱已缩放: {current_illuminance:.1f} lx → {target_illuminance:.1f} lx (因子 {scale_factor:.6f})")
+                if enable_scaling:
+                    # 计算原始照度
+                    current_illuminance = KM * trapezoid(interp_spectrum * np.asarray(v_lambda), STANDARD_WAVELENGTHS)
+                    
+                    # 缩放光谱到目标照度
+                    if current_illuminance > 0:
+                        scale_factor = target_illuminance / current_illuminance
+                        scaled_spectrum = interp_spectrum * scale_factor
+                    
+                    # 显示缩放信息
+                    if abs(scale_factor - 1.0) > 0.01:
+                        st.info(f"🔧 光谱已缩放: {current_illuminance:.1f} lx → {target_illuminance:.1f} lx (因子 {scale_factor:.6f})")
                 
                 debug_mode = st.session_state.get("debug_mode", False)
                 eml, medi, lux = calculate_eml_and_medi(
@@ -1118,16 +1165,16 @@ def main():
                     st.markdown(t['data_note_content'].format(len(wl_input), input_min, input_max, step_in))
                     st.markdown(f"标准网格: {STANDARD_WAVELENGTHS[0]}-{STANDARD_WAVELENGTHS[-1]} nm，固定步长 {STANDARD_DELTA} nm（共 {len(STANDARD_WAVELENGTHS)} 个点）")
                     st.markdown("插值方法: 能量守恒插值（用户光谱），线性插值（灵敏度函数）")
-                    if abs(scale_factor - 1.0) > 0.01:
+                    if enable_scaling and abs(scale_factor - 1.0) > 0.01:
                         st.markdown(f"光谱缩放: {current_illuminance:.1f} lx → {target_illuminance:.1f} lx (因子 {scale_factor:.6f})")
                 
                 fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
                 report_data = generate_word_report(
                     t, analyst_name, analyst_title, eml, medi, lux, 
                     well_results, fig_html, input_min, input_max, step_in, len(wl_input),
-                    scale_factor if abs(scale_factor - 1.0) > 0.01 else None,
-                    current_illuminance if abs(scale_factor - 1.0) > 0.01 else None,
-                    target_illuminance if abs(scale_factor - 1.0) > 0.01 else None
+                    scale_factor if enable_scaling and abs(scale_factor - 1.0) > 0.01 else None,
+                    current_illuminance if enable_scaling and abs(scale_factor - 1.0) > 0.01 else None,
+                    target_illuminance if enable_scaling and abs(scale_factor - 1.0) > 0.01 else None
                 )
                 st.download_button(
                     label=t['export_btn'],
