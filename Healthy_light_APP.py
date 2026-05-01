@@ -2,10 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from io import StringIO, BytesIO
+from io import StringIO
 import re
 import json
-import os
 from datetime import datetime
 import plotly.io as pio
 import requests
@@ -19,10 +18,6 @@ KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 # ==================== 标准网格定义 ====================
 STANDARD_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm，步长5nm
 STANDARD_DELTA = 5.0  # 标准网格步长 (nm)
-
-# ==================== 文件路径（使用绝对路径）====================
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SPECTRAL_DATA_FILE = os.path.join(SCRIPT_DIR, "spectral_data.json")
 
 # ==================== Supabase 配置 ====================
 try:
@@ -207,76 +202,54 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== 光谱数据管理 ====================
+# ==================== 光谱数据管理（Supabase 存储）====================
 def load_spectral_data(debug=False):
-    """加载光谱数据，Nz(λ) 进行积分归一化"""
-    if os.path.exists(SPECTRAL_DATA_FILE):
-        try:
-            with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                v_lambda = data.get('v_lambda', DEFAULT_V_LAMBDA)
-                nz_lambda = data.get('nz_lambda', DEFAULT_NZ_LAMBDA)
-        except Exception:
-            v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
-    else:
-        v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
+    """从 Supabase 加载光谱数据，否则使用预设数据"""
+    user_id = st.session_state.get("user_id", "")
+    if not user_id or user_id == "admin":
+        return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
     
-    wavelengths = np.asarray(STANDARD_WAVELENGTHS)
-    
-    # V(λ)：峰值归一化到 1.0
-    v_array = np.asarray(v_lambda)
-    v_max = np.max(v_array)
-    if abs(v_max - 1.0) > 0.01:
+    try:
+        response = supabase_get("profiles", user_id)
+        if response.status_code == 200 and response.json():
+            data = response.json()[0]
+            spectral_data = data.get("spectral_data")
+            if spectral_data:
+                import json
+                saved = json.loads(spectral_data)
+                v_lambda = saved.get('v_lambda', DEFAULT_V_LAMBDA)
+                nz_lambda = saved.get('nz_lambda', DEFAULT_NZ_LAMBDA)
+                if debug:
+                    st.info("📂 从数据库加载光谱数据")
+                return v_lambda, nz_lambda
+    except Exception as e:
         if debug:
-            st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
-        v_lambda = (v_array / v_max).tolist()
+            st.warning(f"加载失败: {e}")
     
-    # Nz(λ)：积分归一化到 1.0
-    nz_array = np.asarray(nz_lambda)
-    current_integral_nz = trapezoid(nz_array, wavelengths)
-    
-    if abs(current_integral_nz - 1.0) > 0.05:
-        scale_factor = 1.0 / current_integral_nz
-        nz_lambda = (nz_array * scale_factor).tolist()
-        if debug:
-            st.info(f"🔧 Nz(λ) 积分归一化: ∫Nz {current_integral_nz:.4f} → 1.0 (因子 {scale_factor:.4f})")
-    
-    if debug:
-        v_array = np.asarray(v_lambda)
-        nz_array = np.asarray(nz_lambda)
-        integral_v = trapezoid(v_array, wavelengths)
-        integral_nz = trapezoid(nz_array, wavelengths)
-        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
-        st.info(f"📊 V(λ) 积分值: {integral_v:.4f}")
-        st.info(f"📊 Nz(λ) 积分值: {integral_nz:.4f}")
-    
-    return v_lambda, nz_lambda
+    return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
 
 def save_spectral_data(v_lambda, nz_lambda):
-    """保存光谱数据到 JSON 文件"""
+    """保存光谱数据到 Supabase"""
+    user_id = st.session_state.get("user_id", "")
+    if not user_id or user_id == "admin":
+        return False
+    
     try:
+        import json
         data = {
             'v_lambda': [float(x) for x in v_lambda],
             'nz_lambda': [float(x) for x in nz_lambda],
             'last_updated': datetime.now().isoformat()
         }
-        
-        with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        # 验证保存
-        if os.path.exists(SPECTRAL_DATA_FILE):
-            return True
-        else:
-            return False
+        response = supabase_patch("profiles", user_id, {"spectral_data": json.dumps(data)})
+        return response.status_code in [200, 204]
     except Exception as e:
         print(f"保存失败: {e}")
         return False
 
 def reset_to_default():
     """重置为预设数据"""
-    if os.path.exists(SPECTRAL_DATA_FILE):
-        os.remove(SPECTRAL_DATA_FILE)
+    save_spectral_data(DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA)
     return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
 
 # ==================== 插值函数 ====================
@@ -352,9 +325,7 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
         st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
         st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
         st.write("---")
-        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
-        st.write(f"动态 EML_CONSTANT = KM × ∫V = {eml_constant:.2f}")
-        st.write("---")
+        st.write(f"动态 EML_CONSTANT = {eml_constant:.2f}")
         st.write(f"KM = {KM}")
         st.write(f"视觉照度 = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
         st.write(f"EML = {eml_constant:.2f} × {integral_nz:.6e} = {eml:.2f} lx")
@@ -549,7 +520,6 @@ def admin_dialog():
     # ========== 数据编辑表格 ==========
     st.subheader("📊 光谱数据编辑")
     
-    # 设置列格式
     column_config = {
         "波长 (nm)": st.column_config.NumberColumn(format="%d"),
         "V(λ) 明视觉": st.column_config.NumberColumn(format="%.8f"),
@@ -630,18 +600,18 @@ def admin_dialog():
     
     with col3:
         if st.button("🔄 重置为预设数据", use_container_width=True):
-            v, nz = reset_to_default()
+            reset_to_default()
             st.session_state.admin_df = pd.DataFrame({
                 '波长 (nm)': STANDARD_WAVELENGTHS,
-                'V(λ) 明视觉': v,
-                'Nz(λ) 黑视素': nz
+                'V(λ) 明视觉': DEFAULT_V_LAMBDA,
+                'Nz(λ) 黑视素': DEFAULT_NZ_LAMBDA
             })
             st.success("已重置为 CIE S026 标准数据")
             st.rerun()
     
     # ========== 保存按钮 ==========
     st.markdown("---")
-    st.caption("💡 点击保存后数据将写入系统")
+    st.caption("💡 点击保存后数据将写入数据库")
     
     col_save, col_cancel = st.columns(2)
     
@@ -659,7 +629,7 @@ def admin_dialog():
                 st.session_state.admin_authenticated = False
                 st.rerun()
             else:
-                st.error("❌ 保存失败，请检查服务器日志")
+                st.error("❌ 保存失败，请检查日志")
     
     with col_cancel:
         if st.button("❌ 取消", use_container_width=True):
@@ -705,6 +675,9 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'textarea_label': '选项 B: 粘贴或输入光谱数据',
         'textarea_placeholder': '波长(nm),功率(W/m²/nm)\\n380 0.0012\\n385 0.0021',
         'unit_note': '💡 单位说明：功率单位为 W/m²/nm（瓦每平方米每纳米）',
+        'target_illuminance': '🎯 目标照度 (lx)',
+        'target_illuminance_help': '输入期望的照度值，系统将自动缩放光谱',
+        'scale_info': '💡 光谱将按比例缩放到目标照度',
         'calc_btn': '🚀 计算 EML / m-EDI',
         'result_title': '📊 计算结果',
         'eml_label': '等值黑视素照度 (EML)',
@@ -783,6 +756,9 @@ Where:
         'textarea_label': 'Option B: Paste or Enter Spectral Data',
         'textarea_placeholder': 'Wavelength(nm),Power(W/m²/nm)\\n380 0.0012\\n385 0.0021',
         'unit_note': '💡 Unit Note: Power unit is W/m²/nm',
+        'target_illuminance': '🎯 Target Illuminance (lx)',
+        'target_illuminance_help': 'Enter desired illuminance, spectrum will be scaled automatically',
+        'scale_info': '💡 Spectrum will be scaled to target illuminance',
         'calc_btn': '🚀 Calculate EML / m-EDI',
         'result_title': '📊 Results',
         'eml_label': 'Equivalent Melanopic Lux (EML)',
@@ -830,7 +806,8 @@ Where:
 
 # ==================== Word 报告生成 ====================
 def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux, 
-                         well_results, fig_html, input_min, input_max, step, num_points):
+                         well_results, fig_html, input_min, input_max, step, num_points,
+                         scale_factor=None, original_illuminance=None, target_illuminance=None):
     
     if eml >= 250:
         rating_text = "⭐ 日间使用推荐" if t['page_title'].startswith('健康') else "⭐ Recommended for daytime"
@@ -859,6 +836,10 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
         analyst_info += f" ({analyst_title})"
     
     current_date = datetime.now().strftime('%Y-%m-%d')
+    
+    scale_note = ""
+    if scale_factor is not None and abs(scale_factor - 1.0) > 0.01:
+        scale_note = f'<p style="font-size: 10pt; color: #666;">💡 光谱已缩放: {original_illuminance:.1f} lx → {target_illuminance:.1f} lx (因子 {scale_factor:.6f})</p>'
     
     html_content = f"""<!DOCTYPE html>
 <html>
@@ -899,6 +880,7 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 <div class="header-info">
     <p style="margin: 3px 0;"><strong>{t['report_date']}:</strong> {current_date}</p>
     <p style="margin: 3px 0;"><strong>{t['report_analyst']}:</strong> {analyst_info}</p>
+    {scale_note}
 </div>
 
 <h2>{t['result_title']}</h2>
@@ -1001,6 +983,21 @@ def main():
     spectrum_text = st.text_area(t['textarea_label'], height=150, placeholder=t['textarea_placeholder'])
     st.caption(t['unit_note'])
     
+    # 目标照度输入
+    col_target, col_scale_info = st.columns([1, 2])
+    with col_target:
+        target_illuminance = st.number_input(
+            t['target_illuminance'],
+            min_value=1.0,
+            max_value=100000.0,
+            value=100.0,
+            step=10.0,
+            key="target_illuminance_input",
+            help=t['target_illuminance_help']
+        )
+    with col_scale_info:
+        st.caption(t['scale_info'])
+    
     if st.button(t['calc_btn'], type="primary", use_container_width=True):
         allowed, new_remaining, error_msg = consume_trial(st.session_state.user_id, "eml_calculator")
         if not allowed:
@@ -1022,11 +1019,24 @@ def main():
                 st.info(t['detected'].format(input_min, input_max, step_in, len(wl_input)))
                 
                 v_lambda, nz_lambda = load_spectral_data()
+                
+                # 插值用户光谱到标准网格
                 interp_spectrum = interpolate_energy_conserving(wl_input, power_input, STANDARD_WAVELENGTHS)
+                
+                # 计算原始照度
+                current_illuminance = KM * trapezoid(interp_spectrum * np.asarray(v_lambda), STANDARD_WAVELENGTHS)
+                
+                # 缩放光谱到目标照度
+                scale_factor = target_illuminance / current_illuminance if current_illuminance > 0 else 1.0
+                scaled_spectrum = interp_spectrum * scale_factor
+                
+                # 显示缩放信息
+                if abs(scale_factor - 1.0) > 0.01:
+                    st.info(f"🔧 光谱已缩放: {current_illuminance:.1f} lx → {target_illuminance:.1f} lx (因子 {scale_factor:.6f})")
                 
                 debug_mode = st.session_state.get("debug_mode", False)
                 eml, medi, lux = calculate_eml_and_medi(
-                    interp_spectrum, v_lambda, nz_lambda, debug=debug_mode
+                    scaled_spectrum, v_lambda, nz_lambda, debug=debug_mode
                 )
                 well_results = get_well_comparison(eml)
                 
@@ -1071,21 +1081,21 @@ def main():
                     marker=dict(color='orange', size=6, symbol='circle')
                 ))
                 fig.add_trace(go.Scatter(
-                    x=STANDARD_WAVELENGTHS, y=interp_spectrum, 
+                    x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
                     mode='lines', name=t['vis_interp'],
                     line=dict(color='darkblue', width=2)
                 ))
                 
                 v_max = max(v_lambda)
-                if v_max > 0 and max(interp_spectrum) > 0:
-                    v_scaled = np.array(v_lambda) / v_max * max(interp_spectrum) * 0.6
+                if v_max > 0 and max(scaled_spectrum) > 0:
+                    v_scaled = np.array(v_lambda) / v_max * max(scaled_spectrum) * 0.6
                     fig.add_trace(go.Scatter(
                         x=STANDARD_WAVELENGTHS, y=v_scaled, 
                         mode='lines', name=t['vis_vlambda'],
                         line=dict(color='red', dash='dot', width=2)
                     ))
                 
-                nz_weighted = interp_spectrum * nz_lambda
+                nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
                     fig.add_trace(go.Scatter(
                         x=STANDARD_WAVELENGTHS, y=nz_weighted, 
@@ -1108,11 +1118,16 @@ def main():
                     st.markdown(t['data_note_content'].format(len(wl_input), input_min, input_max, step_in))
                     st.markdown(f"标准网格: {STANDARD_WAVELENGTHS[0]}-{STANDARD_WAVELENGTHS[-1]} nm，固定步长 {STANDARD_DELTA} nm（共 {len(STANDARD_WAVELENGTHS)} 个点）")
                     st.markdown("插值方法: 能量守恒插值（用户光谱），线性插值（灵敏度函数）")
+                    if abs(scale_factor - 1.0) > 0.01:
+                        st.markdown(f"光谱缩放: {current_illuminance:.1f} lx → {target_illuminance:.1f} lx (因子 {scale_factor:.6f})")
                 
                 fig_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', config={'displayModeBar': False})
                 report_data = generate_word_report(
                     t, analyst_name, analyst_title, eml, medi, lux, 
-                    well_results, fig_html, input_min, input_max, step_in, len(wl_input)
+                    well_results, fig_html, input_min, input_max, step_in, len(wl_input),
+                    scale_factor if abs(scale_factor - 1.0) > 0.01 else None,
+                    current_illuminance if abs(scale_factor - 1.0) > 0.01 else None,
+                    target_illuminance if abs(scale_factor - 1.0) > 0.01 else None
                 )
                 st.download_button(
                     label=t['export_btn'],
