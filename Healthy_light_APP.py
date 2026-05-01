@@ -635,6 +635,7 @@ def admin_dialog():
     chart_placeholder.plotly_chart(update_chart(edited_df), use_container_width=True)
     
     # ========== 批量操作 ==========
+        # ========== 批量操作 ==========
     st.subheader("📁 批量操作")
     col1, col2, col3 = st.columns(3)
     
@@ -704,8 +705,47 @@ def admin_dialog():
             else:
                 st.error("重置失败")
     
-    # ========== 保存按钮（分离保存和关闭）==========
-        # 保存按钮（在 admin_dialog 函数末尾附近）
+    # ========== 🆕 诊断工具 ==========
+    with st.expander("🔧 诊断工具（如保存失败请点击测试）"):
+        if st.button("测试 Supabase 连接和写入"):
+            try:
+                # 测试读取
+                test_read = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/app_config?id=eq.1",
+                    headers=HEADERS
+                )
+                st.write(f"📖 读取测试状态码: {test_read.status_code}")
+                if test_read.status_code == 200:
+                    st.success("✅ 读取成功")
+                    st.json(test_read.json())
+                else:
+                    st.error(f"❌ 读取失败: {test_read.text}")
+                
+                # 测试写入
+                test_data = {
+                    "id": 1,
+                    "spectral_data": json.dumps({"test": "diagnostic", "timestamp": datetime.now().isoformat()}),
+                    "updated_at": datetime.now().isoformat()
+                }
+                test_write = requests.post(
+                    f"{SUPABASE_URL}/rest/v1/app_config",
+                    headers={
+                        "apikey": SUPABASE_KEY,
+                        "Authorization": f"Bearer {SUPABASE_KEY}",
+                        "Content-Type": "application/json",
+                        "Prefer": "resolution=merge-duplicates"
+                    },
+                    json=test_data
+                )
+                st.write(f"✍️ 写入测试状态码: {test_write.status_code}")
+                if test_write.status_code in [200, 201, 204]:
+                    st.success("✅ 写入成功！Supabase 连接正常")
+                else:
+                    st.error(f"❌ 写入失败: {test_write.text}")
+            except Exception as e:
+                st.error(f"❌ 连接异常: {e}")
+    
+    # ========== 保存按钮 ==========
     st.markdown("---")
     st.caption("💡 点击保存后数据写入全局配置表，然后手动关闭对话框")
     
@@ -717,15 +757,11 @@ def admin_dialog():
                 v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
                 nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
                 
-                # 显示保存进度信息
-                st.info(f"📊 正在保存 {len(v_lambda_save)} 个数据点...")
-                
                 if save_spectral_data(v_lambda_save, nz_lambda_save):
-                    st.success("✅ 数据已成功保存到全局配置表！")
+                    st.success("✅ 数据已保存到全局配置表！")
                     st.balloons()
                 else:
-                    st.error("❌ 保存失败，请检查下方诊断信息")
-                    st.info("💡 提示：请查看终端日志获取详细错误信息")
+                    st.error("❌ 保存失败，请检查下方诊断工具")
     
     with col_close:
         if st.button("❌ 关闭", use_container_width=True):
@@ -733,7 +769,6 @@ def admin_dialog():
                 del st.session_state.admin_df
             st.session_state.admin_authenticated = False
             st.rerun()
-
 # ==================== 多语言文本 ====================
 TEXTS = {
     'zh': {
