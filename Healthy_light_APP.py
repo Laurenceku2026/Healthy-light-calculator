@@ -69,12 +69,11 @@ def get_user_profile(user_id: str):
             return {
                 "subscription_tier": data.get("subscription_tier", "free"),
                 "free_trials_remaining": data.get("free_trials_remaining", 30),
-                "subscription_expires_at": data.get("subscription_expires_at"),
-                "spectral_data": data.get("spectral_data")
+                "subscription_expires_at": data.get("subscription_expires_at")
             }
     except Exception:
         pass
-    return {"subscription_tier": "free", "free_trials_remaining": 30, "subscription_expires_at": None, "spectral_data": None}
+    return {"subscription_tier": "free", "free_trials_remaining": 30, "subscription_expires_at": None}
 
 def get_user_remaining_trials(user_id: str) -> int:
     try:
@@ -204,90 +203,50 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== 光谱数据管理（Supabase 存储 + 自动积分归一化）====================
+# ==================== 光谱数据管理（全局配置表 app_config）====================
 def load_spectral_data(debug=False):
-    """从 Supabase 加载光谱数据，否则使用预设数据，并自动积分归一化 Nz(λ)"""
-    user_id = st.session_state.get("user_id", "")
-    v_lambda = DEFAULT_V_LAMBDA
-    nz_lambda = DEFAULT_NZ_LAMBDA
-    
-    # 尝试从 Supabase 加载
-    if user_id and user_id != "admin":
-        try:
-            response = supabase_get("profiles", user_id)
-            if response.status_code == 200 and response.json():
-                data = response.json()[0]
-                spectral_data = data.get("spectral_data")
-                if spectral_data:
-                    saved = json.loads(spectral_data)
-                    v_lambda = saved.get('v_lambda', DEFAULT_V_LAMBDA)
-                    nz_lambda = saved.get('nz_lambda', DEFAULT_NZ_LAMBDA)
-                    if debug:
-                        st.info("📂 从数据库加载光谱数据")
-        except Exception as e:
-            if debug:
-                st.warning(f"加载失败，使用预设数据: {e}")
-    
-    wavelengths = np.asarray(STANDARD_WAVELENGTHS)
-    
-    # V(λ)：峰值归一化到 1.0
-    v_array = np.asarray(v_lambda)
-    v_max = np.max(v_array)
-    if abs(v_max - 1.0) > 0.01:
+    """从全局配置表 app_config 加载光谱数据"""
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/app_config?id=eq.1",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+        )
+        if response.status_code == 200 and response.json():
+            data = response.json()[0]
+            spectral_data = data.get("spectral_data")
+            if spectral_data:
+                saved = json.loads(spectral_data)
+                v_lambda = saved.get('v_lambda', DEFAULT_V_LAMBDA)
+                nz_lambda = saved.get('nz_lambda', DEFAULT_NZ_LAMBDA)
+                if debug:
+                    st.info("📂 从全局配置表加载光谱数据")
+                return v_lambda, nz_lambda
+    except Exception as e:
         if debug:
-            st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
-        v_lambda = (v_array / v_max).tolist()
-        v_array = np.asarray(v_lambda)
+            st.warning(f"加载失败，使用预设数据: {e}")
     
-    # Nz(λ)：积分归一化到 1.0（CIE S026 标准）
-    nz_array = np.asarray(nz_lambda)
-    current_integral_nz = trapezoid(nz_array, wavelengths)
-    
-    if abs(current_integral_nz - 1.0) > 0.05:
-        scale_factor = 1.0 / current_integral_nz
-        nz_lambda = (nz_array * scale_factor).tolist()
-        if debug:
-            st.info(f"🔧 Nz(λ) 自动积分归一化: ∫Nz {current_integral_nz:.4f} → 1.0 (因子 {scale_factor:.4f})")
-    
-    # 检查 Nz(λ) 峰值位置
-    nz_array = np.asarray(nz_lambda)
-    nz_peak_idx = np.argmax(nz_array)
-    nz_peak_wl = wavelengths[nz_peak_idx]
-    if debug and (nz_peak_wl < 480 or nz_peak_wl > 500):
-        st.warning(f"⚠️ Nz(λ) 峰值在 {nz_peak_wl} nm，标准应在 480-500 nm")
-    
-    if debug:
-        v_array = np.asarray(v_lambda)
-        nz_array = np.asarray(nz_lambda)
-        integral_v = trapezoid(v_array, wavelengths)
-        integral_nz = trapezoid(nz_array, wavelengths)
-        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
-        st.info(f"📊 V(λ) 积分值: {integral_v:.4f}")
-        st.info(f"📊 Nz(λ) 峰值: {np.max(nz_array):.4f} @ {wavelengths[nz_peak_idx]} nm")
-        st.info(f"📊 Nz(λ) 积分值: {integral_nz:.4f}")
-    
-    return v_lambda, nz_lambda
+    return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
 
 def save_spectral_data(v_lambda, nz_lambda):
-    """保存光谱数据到 Supabase"""
-    user_id = st.session_state.get("user_id", "")
-    if not user_id or user_id == "admin":
-        return False
-    
+    """保存光谱数据到全局配置表 app_config"""
     try:
         data = {
             'v_lambda': [float(x) for x in v_lambda],
             'nz_lambda': [float(x) for x in nz_lambda],
             'last_updated': datetime.now().isoformat()
         }
-        response = supabase_patch("profiles", user_id, {"spectral_data": json.dumps(data)})
+        response = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/app_config?id=eq.1",
+            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
+            json={"spectral_data": json.dumps(data), "updated_at": datetime.now().isoformat()}
+        )
         return response.status_code in [200, 204]
     except Exception as e:
         print(f"保存失败: {e}")
         return False
 
 def reset_to_default():
-    """重置为预设数据（保存到 Supabase）"""
+    """重置为预设数据"""
     return save_spectral_data(DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA)
 
 # ==================== 插值函数 ====================
@@ -328,6 +287,50 @@ def interpolate_linear(x_input, y_input, x_target):
         return np.zeros_like(x_target)
     
     return np.interp(x_target, x_input, y_input, left=0, right=0)
+
+# ==================== 加载并自动归一化 Nz(λ) ====================
+def get_normalized_spectral_data(debug=False):
+    """加载光谱数据并自动积分归一化 Nz(λ)"""
+    v_lambda, nz_lambda = load_spectral_data(debug)
+    wavelengths = np.asarray(STANDARD_WAVELENGTHS)
+    
+    # V(λ)：峰值归一化到 1.0
+    v_array = np.asarray(v_lambda)
+    v_max = np.max(v_array)
+    if abs(v_max - 1.0) > 0.01:
+        if debug:
+            st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
+        v_lambda = (v_array / v_max).tolist()
+        v_array = np.asarray(v_lambda)
+    
+    # Nz(λ)：积分归一化到 1.0（CIE S026 标准）
+    nz_array = np.asarray(nz_lambda)
+    current_integral_nz = trapezoid(nz_array, wavelengths)
+    
+    if abs(current_integral_nz - 1.0) > 0.05:
+        scale_factor = 1.0 / current_integral_nz
+        nz_lambda = (nz_array * scale_factor).tolist()
+        if debug:
+            st.info(f"🔧 Nz(λ) 自动积分归一化: ∫Nz {current_integral_nz:.4f} → 1.0 (因子 {scale_factor:.4f})")
+    
+    # 检查 Nz(λ) 峰值位置
+    nz_array = np.asarray(nz_lambda)
+    nz_peak_idx = np.argmax(nz_array)
+    nz_peak_wl = wavelengths[nz_peak_idx]
+    if debug and (nz_peak_wl < 480 or nz_peak_wl > 500):
+        st.warning(f"⚠️ Nz(λ) 峰值在 {nz_peak_wl} nm，标准应在 480-500 nm")
+    
+    if debug:
+        v_array = np.asarray(v_lambda)
+        nz_array = np.asarray(nz_lambda)
+        integral_v = trapezoid(v_array, wavelengths)
+        integral_nz = trapezoid(nz_array, wavelengths)
+        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
+        st.info(f"📊 V(λ) 积分值: {integral_v:.4f}")
+        st.info(f"📊 Nz(λ) 峰值: {np.max(nz_array):.4f} @ {wavelengths[nz_peak_idx]} nm")
+        st.info(f"📊 Nz(λ) 积分值: {integral_nz:.4f}")
+    
+    return v_lambda, nz_lambda
 
 # ==================== EML 计算 ====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False, lang="zh"):
@@ -673,7 +676,7 @@ def admin_dialog():
     
     # ========== 保存按钮（分离保存和关闭）==========
     st.markdown("---")
-    st.caption("💡 点击保存后数据写入数据库，然后手动关闭对话框")
+    st.caption("💡 点击保存后数据写入全局配置表，然后手动关闭对话框")
     
     col_save, col_close = st.columns(2)
     
@@ -683,7 +686,7 @@ def admin_dialog():
             nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
             
             if save_spectral_data(v_lambda_save, nz_lambda_save):
-                st.success("✅ 数据已保存到数据库！")
+                st.success("✅ 数据已保存到全局配置表！")
                 st.balloons()
                 # 不清除认证，不退出，让用户手动关闭
             else:
@@ -1027,7 +1030,7 @@ def main():
         
         st.markdown("---")
         st.caption("📊 当前使用的光谱数据")
-        v_lambda, nz_lambda = load_spectral_data()
+        v_lambda, nz_lambda = get_normalized_spectral_data(debug=False)
         v_peak_idx = np.argmax(v_lambda)
         nz_peak_idx = np.argmax(nz_lambda)
         st.caption(f"标准网格: {STANDARD_WAVELENGTHS[0]}-{STANDARD_WAVELENGTHS[-1]} nm, 步长 {STANDARD_DELTA} nm")
@@ -1079,7 +1082,7 @@ def main():
                 input_min, input_max = wl_input[0], wl_input[-1]
                 st.info(t['detected'].format(input_min, input_max, step_in, len(wl_input)))
                 
-                v_lambda, nz_lambda = load_spectral_data()
+                v_lambda, nz_lambda = get_normalized_spectral_data(debug=False)
                 
                 # 插值用户光谱到标准网格
                 interp_spectrum = interpolate_energy_conserving(wl_input, power_input, STANDARD_WAVELENGTHS)
