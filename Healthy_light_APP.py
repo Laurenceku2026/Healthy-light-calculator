@@ -1141,34 +1141,31 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                                                                # ========== 光谱可视化（左右轴 0 点对齐）==========
+                                                                                                # ========== 光谱可视化（双 Y 轴简化版）==========
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
                 
-                # 计算左轴数据的最大值（用于设置右轴范围）
-                left_max = max(max(power_input), max(scaled_spectrum))
-                
-                # 原始数据（左轴）
+                # 左轴数据
                 fig.add_trace(go.Scatter(
                     x=wl_input, y=power_input, 
                     mode='markers', 
                     name=t['vis_original'].format(step_in),
-                    marker=dict(color='orange', size=6)
+                    marker=dict(color='orange', size=6),
+                    yaxis="y"
                 ))
                 
-                # 插值后光谱（左轴）
                 fig.add_trace(go.Scatter(
                     x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
                     mode='lines', 
                     name=t['vis_interp'],
-                    line=dict(color='darkblue', width=2)
+                    line=dict(color='darkblue', width=2),
+                    yaxis="y"
                 ))
                 
-                # 有效节律光谱 - 放右轴
+                # 右轴数据
                 nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
-                    # 归一化节律光谱到 0-1 范围
                     nz_weighted_normalized = nz_weighted / max(nz_weighted)
                     fig.add_trace(go.Scatter(
                         x=STANDARD_WAVELENGTHS, y=nz_weighted_normalized, 
@@ -1178,7 +1175,6 @@ def main():
                         yaxis="y2"
                     ))
                 
-                # V(λ) 明视觉 - 右轴
                 v_max_val = max(v_lambda)
                 if v_max_val > 0:
                     v_normalized = np.array(v_lambda) / v_max_val
@@ -1190,28 +1186,19 @@ def main():
                         yaxis="y2"
                     ))
                 
-                # 布局设置 - 关键是 range 的设置
+                # 简单的布局设置
                 fig.update_layout(
                     title=t['chart_title'],
                     xaxis_title=t['chart_xlabel'],
-                    yaxis=dict(
-                        title="功率 (W/m²/nm)",
-                        range=[0, left_max * 1.05]  # 左轴从 0 到最大值+5%
-                    ),
+                    yaxis_title="功率 (W/m²/nm)",
                     yaxis2=dict(
-                        title="归一化灵敏度 (0-1)",
+                        title="归一化灵敏度",
                         overlaying="y",
-                        side="right",
-                        range=[0, 1.1],  # 右轴从 0 到 1.1
-                        anchor="x",  # 锚定到 x 轴
-                        scaleanchor="y",  # 关键：不按比例缩放，只是对齐 0 点
+                        side="right"
                     ),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                     height=500
                 )
-                
-                # 强制左右轴的 0 点对齐（通过设置相同的 tick0）
-                fig.update_yaxes(tick0=0, dtick=None)
                 
                 st.plotly_chart(fig, use_container_width=True)
                 # ========== 光谱可视化结束 ==========
