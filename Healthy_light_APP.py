@@ -652,26 +652,46 @@ def admin_dialog():
             st.rerun()
     
     # ========== 保存按钮 ==========
-    st.markdown("---")
-    col_save, col_cancel = st.columns(2)
-    
-    with col_save:
-        if st.button("💾 保存到系统", type="primary", use_container_width=True):
-            v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
-            nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
-            save_spectral_data(v_lambda_save, nz_lambda_save)
-            st.success("✅ 数据已保存！应用将使用新数据进行计算")
-            # 清除 session_state 中的缓存
+    # ========== 保存按钮 ==========
+st.markdown("---")
+st.caption("💡 点击保存后数据将写入系统，关闭对话框后生效")
+
+col_save, col_cancel = st.columns(2)
+
+with col_save:
+    if st.button("💾 保存到系统", type="primary", use_container_width=True):
+        # 从当前编辑的表格获取数据
+        v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
+        nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
+        
+        # 保存到 JSON 文件
+        save_spectral_data(v_lambda_save, nz_lambda_save)
+        
+        st.success("✅ 数据已保存到系统！")
+        st.balloons()
+        
+        # 重新加载数据确保一致性
+        v_reloaded, nz_reloaded = load_spectral_data()
+        st.session_state.admin_df = pd.DataFrame({
+            '波长 (nm)': STANDARD_WAVELENGTHS,
+            'V(λ) 明视觉': v_reloaded,
+            'Nz(λ) 黑视素': nz_reloaded
+        })
+        
+        # 可选：延迟退出，让用户看到成功消息
+        import time
+        time.sleep(1)
+        st.session_state.admin_authenticated = False
+        if "admin_df" in st.session_state:
             del st.session_state.admin_df
-            st.session_state.admin_authenticated = False
-            st.rerun()
-    
-    with col_cancel:
-        if st.button("❌ 取消", use_container_width=True):
-            if "admin_df" in st.session_state:
-                del st.session_state.admin_df
-            st.session_state.admin_authenticated = False
-            st.rerun()
+        st.rerun()
+
+with col_cancel:
+    if st.button("❌ 取消", use_container_width=True):
+        if "admin_df" in st.session_state:
+            del st.session_state.admin_df
+        st.session_state.admin_authenticated = False
+        st.rerun()
 
 # ==================== 多语言文本 ====================
 TEXTS = {
