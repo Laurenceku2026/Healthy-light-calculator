@@ -470,14 +470,65 @@ def admin_dialog():
     st.success("✅ 管理员已登录")
     
     # 加载当前数据
-    current_v, current_nz = load_spectral_data(debug=st.session_state.get("debug_mode", False))
+    current_v, current_nz = load_spectral_data()
     
+    # 创建 DataFrame 用于编辑
     df = pd.DataFrame({
         '波长 (nm)': STANDARD_WAVELENGTHS,
         'V(λ) 明视觉': current_v,
         'Nz(λ) 黑视素': current_nz
     })
     
+    # ========== 粘贴数据区域 ==========
+    st.subheader("📋 快速粘贴数据")
+    st.caption("💡 从 Excel 复制 81 行数据，粘贴到下方文本框，点击按钮即可整列替换")
+    
+    col_paste1, col_paste2 = st.columns(2)
+    
+    with col_paste1:
+        st.markdown("**V(λ) 明视觉数据**")
+        v_paste = st.text_area(
+            "",
+            height=200,
+            key="paste_v",
+            placeholder="0.000039\n0.000064\n0.000120\n0.000217\n...（共81行）"
+        )
+        if st.button("📋 替换 V(λ) 列", key="apply_v", use_container_width=True):
+            try:
+                values = [float(x.strip()) for x in v_paste.strip().split('\n') if x.strip()]
+                if len(values) == len(STANDARD_WAVELENGTHS):
+                    df['V(λ) 明视觉'] = values
+                    st.success(f"✅ 已更新 {len(values)} 个数据")
+                    st.rerun()
+                else:
+                    st.error(f"数据点数错误：需要 {len(STANDARD_WAVELENGTHS)} 个，实际 {len(values)} 个")
+            except Exception as e:
+                st.error(f"解析失败: {e}")
+    
+    with col_paste2:
+        st.markdown("**Nz(λ) 黑视素数据**")
+        nz_paste = st.text_area(
+            "",
+            height=200,
+            key="paste_nz",
+            placeholder="0.000000\n0.000000\n0.000000\n0.000000\n...（共81行）"
+        )
+        if st.button("📋 替换 Nz(λ) 列", key="apply_nz", use_container_width=True):
+            try:
+                values = [float(x.strip()) for x in nz_paste.strip().split('\n') if x.strip()]
+                if len(values) == len(STANDARD_WAVELENGTHS):
+                    df['Nz(λ) 黑视素'] = values
+                    st.success(f"✅ 已更新 {len(values)} 个数据")
+                    st.rerun()
+                else:
+                    st.error(f"数据点数错误：需要 {len(STANDARD_WAVELENGTHS)} 个，实际 {len(values)} 个")
+            except Exception as e:
+                st.error(f"解析失败: {e}")
+    
+    st.markdown("---")
+    st.caption("💡 提示：也可以直接在下方表格中双击编辑或粘贴数据")
+    
+    # ========== 实时图表预览 ==========
     st.subheader("📈 光谱曲线预览（实时更新）")
     chart_placeholder = st.empty()
     
@@ -502,9 +553,8 @@ def admin_dialog():
         )
         return fig
     
+    # ========== 数据编辑表格 ==========
     st.subheader("📊 光谱数据编辑")
-    st.caption("💡 提示：波长固定为 380-780nm，步长 5nm。可以直接编辑数值。")
-    st.caption("📌 保存后 V(λ) 会自动归一化到标准积分值 (∫V dλ = 89.4)")
     
     edited_df = st.data_editor(
         df,
@@ -516,6 +566,7 @@ def admin_dialog():
     
     chart_placeholder.plotly_chart(update_chart(edited_df), use_container_width=True)
     
+    # ========== 批量操作 ==========
     st.subheader("📁 批量操作")
     col1, col2, col3 = st.columns(3)
     
@@ -586,16 +637,17 @@ def admin_dialog():
     
     with col3:
         if st.button("🔄 重置为预设数据", use_container_width=True):
-            reset_to_default()
+            v, nz = reset_to_default()
             st.success("已重置为 CIE S026 标准数据")
             new_df = pd.DataFrame({
                 '波长 (nm)': STANDARD_WAVELENGTHS,
-                'V(λ) 明视觉': DEFAULT_V_LAMBDA,
-                'Nz(λ) 黑视素': DEFAULT_NZ_LAMBDA
+                'V(λ) 明视觉': v,
+                'Nz(λ) 黑视素': nz
             })
             st.session_state.admin_data_editor = new_df.to_dict('records')
             st.rerun()
     
+    # ========== 保存按钮 ==========
     st.markdown("---")
     col_save, col_cancel = st.columns(2)
     
