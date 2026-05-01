@@ -230,21 +230,51 @@ def load_spectral_data(debug=False):
 def save_spectral_data(v_lambda, nz_lambda):
     """保存光谱数据到全局配置表 app_config"""
     try:
-        data = {
-            'v_lambda': [float(x) for x in v_lambda],
-            'nz_lambda': [float(x) for x in nz_lambda],
+        # 转换数据类型
+        v_list = [float(x) for x in v_lambda]
+        nz_list = [float(x) for x in nz_lambda]
+        
+        # 验证数据长度
+        if len(v_list) != len(STANDARD_WAVELENGTHS) or len(nz_list) != len(STANDARD_WAVELENGTHS):
+            print(f"❌ 数据长度错误: V(λ)={len(v_list)}, Nz(λ)={len(nz_list)}, 期望={len(STANDARD_WAVELENGTHS)}")
+            return False
+        
+        # 准备数据
+        data_to_save = {
+            'v_lambda': v_list,
+            'nz_lambda': nz_list,
             'last_updated': datetime.now().isoformat()
         }
-        response = requests.patch(
-            f"{SUPABASE_URL}/rest/v1/app_config?id=eq.1",
-            headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"},
-            json={"spectral_data": json.dumps(data), "updated_at": datetime.now().isoformat()}
+        
+        # 使用 POST + upsert（存在则更新，不存在则插入）
+        response = requests.post(
+            f"{SUPABASE_URL}/rest/v1/app_config",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates"  # 关键：启用 upsert
+            },
+            json={
+                "id": 1,
+                "spectral_data": json.dumps(data_to_save),
+                "updated_at": datetime.now().isoformat()
+            }
         )
-        return response.status_code in [200, 204]
+        
+        # 检查结果
+        if response.status_code in [200, 201, 204]:
+            print(f"✅ 保存成功: {response.status_code}")
+            return True
+        else:
+            print(f"❌ 保存失败: {response.status_code} - {response.text}")
+            return False
+            
     except Exception as e:
-        print(f"保存失败: {e}")
+        print(f"❌ 保存异常: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
 def reset_to_default():
     """重置为预设数据"""
     return save_spectral_data(DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA)
@@ -675,6 +705,7 @@ def admin_dialog():
                 st.error("重置失败")
     
     # ========== 保存按钮（分离保存和关闭）==========
+        # 保存按钮（在 admin_dialog 函数末尾附近）
     st.markdown("---")
     st.caption("💡 点击保存后数据写入全局配置表，然后手动关闭对话框")
     
@@ -682,15 +713,19 @@ def admin_dialog():
     
     with col_save:
         if st.button("💾 保存到系统", type="primary", use_container_width=True):
-            v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
-            nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
-            
-            if save_spectral_data(v_lambda_save, nz_lambda_save):
-                st.success("✅ 数据已保存到全局配置表！")
-                st.balloons()
-                # 不清除认证，不退出，让用户手动关闭
-            else:
-                st.error("❌ 保存失败，请检查日志")
+            with st.spinner("正在保存数据到服务器..."):
+                v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
+                nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
+                
+                # 显示保存进度信息
+                st.info(f"📊 正在保存 {len(v_lambda_save)} 个数据点...")
+                
+                if save_spectral_data(v_lambda_save, nz_lambda_save):
+                    st.success("✅ 数据已成功保存到全局配置表！")
+                    st.balloons()
+                else:
+                    st.error("❌ 保存失败，请检查下方诊断信息")
+                    st.info("💡 提示：请查看终端日志获取详细错误信息")
     
     with col_close:
         if st.button("❌ 关闭", use_container_width=True):
