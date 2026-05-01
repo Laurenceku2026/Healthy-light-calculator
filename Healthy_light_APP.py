@@ -213,7 +213,8 @@ def trapezoid(y, x):
 def load_spectral_data(debug=False):
     """
     加载光谱数据
-    V(λ) 峰值保持为 1.0，不进行缩放
+    V(λ) 保持峰值归一化（物理定义）
+    Nz(λ) 进行积分归一化（CIE S026 标准要求 ∫Nz dλ = 1.0）
     """
     if os.path.exists(SPECTRAL_DATA_FILE):
         try:
@@ -226,31 +227,36 @@ def load_spectral_data(debug=False):
     else:
         v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
     
-    # 转换为 numpy 数组
-    v_array = np.asarray(v_lambda)
-    nz_array = np.asarray(nz_lambda)
+    wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
-    # 确保 V(λ) 峰值归一化到 1.0（物理定义）
+    # V(λ)：峰值归一化到 1.0（保持不变）
+    v_array = np.asarray(v_lambda)
     v_max = np.max(v_array)
     if abs(v_max - 1.0) > 0.01:
         if debug:
             st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
         v_lambda = (v_array / v_max).tolist()
-        v_array = np.asarray(v_lambda)
     
-    # 确保 Nz(λ) 峰值归一化到 1.0
-    nz_max = np.max(nz_array)
-    if abs(nz_max - 1.0) > 0.01:
+    # Nz(λ)：积分归一化到 1.0（CIE S026 标准）
+    nz_array = np.asarray(nz_lambda)
+    current_integral_nz = trapezoid(nz_array, wavelengths)
+    
+    if abs(current_integral_nz - 1.0) > 0.05:
+        scale_factor = 1.0 / current_integral_nz
+        nz_lambda = (nz_array * scale_factor).tolist()
         if debug:
-            st.warning(f"⚠️ Nz(λ) 峰值 {nz_max:.4f}，自动归一化到 1.0")
-        nz_lambda = (nz_array / nz_max).tolist()
+            st.info(f"🔧 Nz(λ) 积分归一化: ∫Nz {current_integral_nz:.4f} → 1.0 (因子 {scale_factor:.4f})")
+    else:
+        # 即使积分正确，也确保峰值显示（仅用于调试）
+        if debug:
+            nz_max = np.max(nz_array)
+            st.info(f"📊 Nz(λ) 峰值: {nz_max:.4f} @ {wavelengths[np.argmax(nz_array)]} nm")
     
     if debug:
-        wavelengths = np.asarray(STANDARD_WAVELENGTHS)
+        v_array = np.asarray(v_lambda)
         integral_v = trapezoid(v_array, wavelengths)
-        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
-        st.info(f"📊 V(λ) 积分值: {integral_v:.4f} (5nm 离散网格)")
-        st.info(f"📊 Nz(λ) 峰值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
+        st.info(f"📊 V(λ) 积分值: {integral_v:.4f}")
+        st.info(f"📊 Nz(λ) 积分值: {trapezoid(np.asarray(nz_lambda), wavelengths):.4f}")
     
     return v_lambda, nz_lambda
 
