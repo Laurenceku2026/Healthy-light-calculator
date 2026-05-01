@@ -1141,7 +1141,7 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                                # ========== 光谱可视化（双 Y 轴版本 - 最简化版）==========
+                                                                # ========== 光谱可视化（有效节律放右轴）==========
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
@@ -1162,14 +1162,17 @@ def main():
                     line=dict(color='darkblue', width=2)
                 ))
                 
-                # 有效节律光谱（左轴）
+                # 有效节律光谱 - 归一化后放右轴
                 nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
+                    # 归一化节律光谱到 0-1 范围
+                    nz_weighted_normalized = nz_weighted / max(nz_weighted)
                     fig.add_trace(go.Scatter(
-                        x=STANDARD_WAVELENGTHS, y=nz_weighted, 
+                        x=STANDARD_WAVELENGTHS, y=nz_weighted_normalized, 
                         mode='lines', 
                         name=t['vis_weighted'],
-                        line=dict(color='green', dash='dash', width=2)
+                        line=dict(color='green', dash='dash', width=2),
+                        yaxis="y2"
                     ))
                 
                 # V(λ) 明视觉 - 右轴
@@ -1184,20 +1187,21 @@ def main():
                         yaxis="y2"
                     ))
                 
-                # 最简化的布局设置
+                # 布局设置
                 fig.update_layout(
                     title=t['chart_title'],
                     xaxis_title=t['chart_xlabel'],
-                    yaxis_title="功率 / 节律响应 (W/m²/nm)",
+                    yaxis_title="功率 (W/m²/nm)",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                     height=500
                 )
                 
-                # 单独设置右 Y 轴
+                # 设置右 Y 轴
                 fig.layout.yaxis2 = dict(
-                    title="明视觉灵敏度 V(λ) (归一化)",
+                    title="归一化灵敏度 (0-1)",
                     overlaying="y",
-                    side="right"
+                    side="right",
+                    range=[0, 1.1]
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
