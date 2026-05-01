@@ -1141,7 +1141,7 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                # ========== 光谱可视化（双 Y 轴版本 - 简单版）==========
+                                                # ========== 光谱可视化（双 Y 轴版本 - 最简化版）==========
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
@@ -1151,7 +1151,7 @@ def main():
                     x=wl_input, y=power_input, 
                     mode='markers', 
                     name=t['vis_original'].format(step_in),
-                    marker=dict(color='orange', size=6, symbol='circle')
+                    marker=dict(color='orange', size=6)
                 ))
                 
                 # 插值后光谱（左轴）
@@ -1184,27 +1184,20 @@ def main():
                         yaxis="y2"
                     ))
                 
-                # 布局设置
+                # 最简化的布局设置
                 fig.update_layout(
                     title=t['chart_title'],
-                    xaxis=dict(title=t['chart_xlabel'], domain=[0, 1]),
-                    yaxis=dict(
-                        title="功率 / 节律响应 (W/m²/nm)",
-                        titlefont=dict(color="blue"),
-                        tickfont=dict(color="blue")
-                    ),
-                    yaxis2=dict(
-                        title="明视觉灵敏度 V(λ) (归一化)",
-                        titlefont=dict(color="red"),
-                        tickfont=dict(color="red"),
-                        overlaying="y",
-                        side="right",
-                        range=[0, 1.1]
-                    ),
+                    xaxis_title=t['chart_xlabel'],
+                    yaxis_title="功率 / 节律响应 (W/m²/nm)",
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-                    template="plotly_white",
-                    hovermode='x unified',
                     height=500
+                )
+                
+                # 单独设置右 Y 轴
+                fig.layout.yaxis2 = dict(
+                    title="明视觉灵敏度 V(λ) (归一化)",
+                    overlaying="y",
+                    side="right"
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
