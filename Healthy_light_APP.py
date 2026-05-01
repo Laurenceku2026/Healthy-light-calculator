@@ -1003,7 +1003,7 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                # 双 Y 轴光谱可视化
+                                                # 双 Y 轴光谱可视化
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
@@ -1034,7 +1034,7 @@ def main():
                         line=dict(color='#2ca02c', dash='dash', width=2)
                     ))
                 
-                # 4. 明视觉光谱 V(λ) - 使用右 Y 轴（归一化 0-1）
+                # 4. 明视觉光谱 V(λ) - 使用右 Y 轴
                 v_max_val = max(v_lambda)
                 if v_max_val > 0:
                     v_normalized = np.array(v_lambda) / v_max_val
@@ -1046,32 +1046,44 @@ def main():
                         yaxis="y2"
                     ))
                 
-                # 5. 更新布局 - 修复后的版本
+                # 5. 配置布局 - 使用 make_subplots 的方式更可靠
                 fig.update_layout(
                     title=t['chart_title'],
-                    xaxis_title=t['chart_xlabel'],
-                    yaxis_title="功率 / 节律响应 (W/m²/nm)",
-                    legend_title="Spectrum Type",
+                    xaxis=dict(
+                        title=t['chart_xlabel'],
+                        tickmode='linear',
+                        dtick=50,
+                        range=[380, 780]
+                    ),
+                    yaxis=dict(
+                        title="功率 / 节律响应 (W/m²/nm)",
+                        titlefont=dict(color="#1f77b4"),
+                        tickfont=dict(color="#1f77b4")
+                    ),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="center",
+                        x=0.5
+                    ),
                     template="plotly_white",
                     hovermode='x unified',
                     height=550
                 )
                 
-                # 单独设置 yaxis2（右 Y 轴）
+                # 单独添加右 Y 轴（使用 update_layout 的 yaxis2 参数）
                 fig.update_layout(
-                    yaxis2={
-                        "title": "明视觉灵敏度 V(λ) (归一化)",
-                        "overlaying": "y",
-                        "side": "right",
-                        "showgrid": False,
-                        "range": [0, 1.05],
-                        "titlefont": {"color": "#d62728"},
-                        "tickfont": {"color": "#d62728"}
-                    }
+                    yaxis2=dict(
+                        title="明视觉灵敏度 V(λ) (归一化)",
+                        overlaying="y",
+                        side="right",
+                        showgrid=False,
+                        range=[0, 1.05],
+                        titlefont=dict(color="#d62728"),
+                        tickfont=dict(color="#d62728")
+                    )
                 )
-                
-                # 设置左 Y 轴颜色
-                fig.update_yaxes(titlefont_color="#1f77b4", tickfont_color="#1f77b4")
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
