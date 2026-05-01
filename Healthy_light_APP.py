@@ -20,6 +20,10 @@ KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 STANDARD_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm，步长5nm
 STANDARD_DELTA = 5.0  # 标准网格步长 (nm)
 
+# ==================== 文件路径（使用绝对路径）====================
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SPECTRAL_DATA_FILE = os.path.join(SCRIPT_DIR, "spectral_data.json")
+
 # ==================== Supabase 配置 ====================
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -152,10 +156,7 @@ else:
     st.warning("请从 TechLife Suite 门户登录后访问")
     st.stop()
 
-# ==================== 数据文件路径 ====================
-SPECTRAL_DATA_FILE = "spectral_data.json"
-
-# ==================== 正确的预设数据（CIE S 026:2018 标准）====================
+# ==================== 预设数据 ====================
 # V(λ) 明视觉数据（峰值 555nm = 1.0）
 DEFAULT_V_LAMBDA = [
     0.000039, 0.000064, 0.000120, 0.000217, 0.000396, 0.000640, 0.001210, 0.002180, 0.004000, 0.007300,
@@ -206,9 +207,9 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== 光谱数据管理（积分归一化）====================
+# ==================== 光谱数据管理 ====================
 def load_spectral_data(debug=False):
-    """加载光谱数据，Nz(λ) 进行积分归一化（CIE S026 标准要求 ∫Nz dλ = 1.0）"""
+    """加载光谱数据，Nz(λ) 进行积分归一化"""
     if os.path.exists(SPECTRAL_DATA_FILE):
         try:
             with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
@@ -222,7 +223,7 @@ def load_spectral_data(debug=False):
     
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
-    # V(λ)：峰值归一化到 1.0（物理定义）
+    # V(λ)：峰值归一化到 1.0
     v_array = np.asarray(v_lambda)
     v_max = np.max(v_array)
     if abs(v_max - 1.0) > 0.01:
@@ -230,7 +231,7 @@ def load_spectral_data(debug=False):
             st.warning(f"⚠️ V(λ) 峰值 {v_max:.4f}，自动归一化到 1.0")
         v_lambda = (v_array / v_max).tolist()
     
-    # Nz(λ)：积分归一化到 1.0（CIE S026 标准）
+    # Nz(λ)：积分归一化到 1.0
     nz_array = np.asarray(nz_lambda)
     current_integral_nz = trapezoid(nz_array, wavelengths)
     
@@ -253,13 +254,24 @@ def load_spectral_data(debug=False):
 
 def save_spectral_data(v_lambda, nz_lambda):
     """保存光谱数据到 JSON 文件"""
-    data = {
-        'v_lambda': [float(x) for x in v_lambda],
-        'nz_lambda': [float(x) for x in nz_lambda],
-        'last_updated': datetime.now().isoformat()
-    }
-    with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        data = {
+            'v_lambda': [float(x) for x in v_lambda],
+            'nz_lambda': [float(x) for x in nz_lambda],
+            'last_updated': datetime.now().isoformat()
+        }
+        
+        with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        # 验证保存
+        if os.path.exists(SPECTRAL_DATA_FILE):
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"保存失败: {e}")
+        return False
 
 def reset_to_default():
     """重置为预设数据"""
@@ -330,8 +342,8 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
         st.write(f"标准网格: {wavelengths[0]}-{wavelengths[-1]} nm, 步长 {STANDARD_DELTA} nm")
         st.write("---")
         st.write("**V(λ) 和 Nz(λ) 数据检查（理论值：∫V=106.86，∫Nz=1.0）**")
-        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f} {'✅' if abs(integral_v_spectrum - 106.86) < 5 else '⚠️'}")
-        st.write(f"∫ Nz(λ) dλ = {trapezoid(nz_lambda, wavelengths):.4f} {'✅' if abs(trapezoid(nz_lambda, wavelengths) - 1.0) < 0.05 else '⚠️'}")
+        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
+        st.write(f"∫ Nz(λ) dλ = {trapezoid(nz_lambda, wavelengths):.4f}")
         st.write("---")
         st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
         st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
@@ -454,6 +466,31 @@ def admin_dialog():
     if "admin_df" not in st.session_state:
         st.session_state.admin_df = df_initial.copy()
     
+    # ========== 实时图表预览 ==========
+    st.subheader("📈 光谱曲线预览（实时更新）")
+    chart_placeholder = st.empty()
+    
+    def update_chart(dataframe):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=dataframe['波长 (nm)'], y=dataframe['V(λ) 明视觉'],
+            mode='lines', name='V(λ) 明视觉',
+            line=dict(color='red', width=2, dash='dot')
+        ))
+        fig.add_trace(go.Scatter(
+            x=dataframe['波长 (nm)'], y=dataframe['Nz(λ) 黑视素'],
+            mode='lines', name='Nz(λ) 黑视素',
+            line=dict(color='blue', width=2)
+        ))
+        fig.update_layout(
+            title="明视觉光谱 (Vλ) vs 黑视素光谱 (Nz)",
+            xaxis_title="波长 (nm)",
+            yaxis_title="相对灵敏度",
+            template="plotly_white",
+            height=400
+        )
+        return fig
+    
     # ========== 粘贴数据区域 ==========
     st.subheader("📋 快速粘贴数据")
     st.caption("💡 从 Excel 复制整列数据，粘贴到下方文本框，点击按钮即可替换")
@@ -507,37 +544,12 @@ def admin_dialog():
                 st.error(f"解析失败: {e}")
     
     st.markdown("---")
-    st.caption("💡 提示：也可以直接在下方表格中编辑，数据会自动保存")
-    
-    # ========== 实时图表预览 ==========
-    st.subheader("📈 光谱曲线预览（实时更新）")
-    chart_placeholder = st.empty()
-    
-    def update_chart(dataframe):
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=dataframe['波长 (nm)'], y=dataframe['V(λ) 明视觉'],
-            mode='lines', name='V(λ) 明视觉',
-            line=dict(color='red', width=2, dash='dot')
-        ))
-        fig.add_trace(go.Scatter(
-            x=dataframe['波长 (nm)'], y=dataframe['Nz(λ) 黑视素'],
-            mode='lines', name='Nz(λ) 黑视素',
-            line=dict(color='blue', width=2)
-        ))
-        fig.update_layout(
-            title="明视觉光谱 (Vλ) vs 黑视素光谱 (Nz)",
-            xaxis_title="波长 (nm)",
-            yaxis_title="相对灵敏度",
-            template="plotly_white",
-            height=400
-        )
-        return fig
+    st.caption("💡 提示：也可以直接在下方表格中编辑")
     
     # ========== 数据编辑表格 ==========
     st.subheader("📊 光谱数据编辑")
     
-    # 设置列格式，避免显示空格分隔符
+    # 设置列格式
     column_config = {
         "波长 (nm)": st.column_config.NumberColumn(format="%d"),
         "V(λ) 明视觉": st.column_config.NumberColumn(format="%.8f"),
@@ -629,27 +641,25 @@ def admin_dialog():
     
     # ========== 保存按钮 ==========
     st.markdown("---")
-    st.caption("💡 点击保存后数据将写入系统，关闭对话框后生效")
+    st.caption("💡 点击保存后数据将写入系统")
     
     col_save, col_cancel = st.columns(2)
     
     with col_save:
         if st.button("💾 保存到系统", type="primary", use_container_width=True):
-            # 从当前编辑的表格获取数据
             v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
             nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
             
-            # 保存到 JSON 文件
-            save_spectral_data(v_lambda_save, nz_lambda_save)
-            
-            st.success("✅ 数据已保存到系统！")
-            st.balloons()
-            
-            # 清除 session_state 缓存，退出管理员模式
-            if "admin_df" in st.session_state:
-                del st.session_state.admin_df
-            st.session_state.admin_authenticated = False
-            st.rerun()
+            if save_spectral_data(v_lambda_save, nz_lambda_save):
+                st.success("✅ 数据已保存到系统！")
+                st.balloons()
+                # 清除缓存，退出管理员模式
+                if "admin_df" in st.session_state:
+                    del st.session_state.admin_df
+                st.session_state.admin_authenticated = False
+                st.rerun()
+            else:
+                st.error("❌ 保存失败，请检查服务器日志")
     
     with col_cancel:
         if st.button("❌ 取消", use_container_width=True):
