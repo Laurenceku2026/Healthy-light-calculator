@@ -320,11 +320,6 @@ def interpolate_linear(x_input, y_input, x_target):
 
 # ==================== EML 计算（完全动态适配）====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
-    """
-    计算 EML 和 m-EDI
-    公式: EML = KM × ∫ V(λ) dλ × ∫ E(λ) × Nz(λ) dλ
-    所有积分自动适配步长
-    """
     spectrum = np.asarray(spectrum_w_m2_nm)
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
@@ -336,8 +331,12 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     integral_nz = trapezoid(weighted_melanopic, wavelengths)
     integral_v = trapezoid(weighted_photopic, wavelengths)
     
-    # 动态计算 EML_CONSTANT = KM × ∫ V(λ) dλ
-    integral_v_spectrum = trapezoid(v_lambda, wavelengths)
+    # ========== 新增：计算 V(λ) 和 Nz(λ) 本身的积分 ==========
+    integral_v_spectrum = trapezoid(v_lambda, wavelengths)      # ∫ V(λ) dλ
+    integral_nz_spectrum = trapezoid(nz_lambda, wavelengths)    # ∫ Nz(λ) dλ
+    # ========================================================
+    
+    # 动态计算 EML_CONSTANT
     eml_constant = KM * integral_v_spectrum
     
     # 计算结果
@@ -348,28 +347,29 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     if debug:
         st.write("### 🔍 调试信息")
         st.write(f"标准网格: {wavelengths[0]}-{wavelengths[-1]} nm, 步长 {STANDARD_DELTA} nm")
-        st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
-        st.write(f"光谱峰值波长: {wavelengths[np.argmax(spectrum)]} nm")
+        
+        # ========== 新增：显示 V(λ) 和 Nz(λ) 的积分值 ==========
         st.write("---")
+        st.write("**V(λ) 和 Nz(λ) 数据检查（理论值：∫V=106.86，∫Nz=1.0）**")
+        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f} {'✅' if abs(integral_v_spectrum - 106.86) < 5 else '⚠️ 偏离理论值'}")
+        st.write(f"∫ Nz(λ) dλ = {integral_nz_spectrum:.4f} {'✅' if abs(integral_nz_spectrum - 1.0) < 0.1 else '⚠️ 应为 1.0'}")
+        st.write("（CIE S026 标准：∫V=106.86，∫Nz=1.0）")
+        # =====================================================
+        
+        st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
         st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
         st.write(f"Nz(λ) 最大值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
         st.write("---")
-        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
-        st.write(f"动态 EML_CONSTANT = {eml_constant:.2f}")
         st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
         st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
+        st.write("---")
+        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
+        st.write(f"动态 EML_CONSTANT = KM × ∫V = {eml_constant:.2f}")
         st.write("---")
         st.write(f"KM = {KM}")
         st.write(f"视觉照度 = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
         st.write(f"EML = {eml_constant:.2f} × {integral_nz:.6e} = {eml:.2f} lx")
         st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
-        
-        # 检查光谱覆盖范围
-        non_zero = np.sum(spectrum > 0)
-        if non_zero < len(spectrum):
-            first_nonzero = np.argmax(spectrum > 0)
-            last_nonzero = len(spectrum) - 1 - np.argmax(spectrum[::-1] > 0)
-            st.warning(f"⚠️ 光谱覆盖范围: {wavelengths[first_nonzero]} - {wavelengths[last_nonzero]} nm")
         st.write("===================")
     
     return eml, medi, illuminance
