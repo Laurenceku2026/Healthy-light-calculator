@@ -1273,8 +1273,8 @@ fig.update_layout(
 )
 
 # 可选：调整左 Y 轴颜色
-fig.update_yaxes(titlefont=dict(color="darkblue"), tickfont=dict(color="darkblue"))
-                st.plotly_chart(fig, use_container_width=True)
+    fig.update_yaxes(titlefont=dict(color="darkblue"), tickfont=dict(color="darkblue"))
+            st.plotly_chart(fig, use_container_width=True)
                 
                 with st.expander(t['data_note_title']):
                     st.markdown(t['data_note_content'].format(len(wl_input), input_min, input_max, step_in))
