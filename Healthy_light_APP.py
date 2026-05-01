@@ -1141,12 +1141,12 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                                                                                # ========== 光谱可视化（双 Y 轴简化版）==========
+                            # ========== 光谱可视化（原始数据左轴，其他全部右轴）==========
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
                 
-                # 左轴数据
+                # 只有原始数据在左轴
                 fig.add_trace(go.Scatter(
                     x=wl_input, y=power_input, 
                     mode='markers', 
@@ -1155,15 +1155,17 @@ def main():
                     yaxis="y"
                 ))
                 
+                # 插值后光谱 - 右轴（归一化）
+                interp_normalized = scaled_spectrum / max(scaled_spectrum) if max(scaled_spectrum) > 0 else scaled_spectrum
                 fig.add_trace(go.Scatter(
-                    x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
+                    x=STANDARD_WAVELENGTHS, y=interp_normalized, 
                     mode='lines', 
                     name=t['vis_interp'],
                     line=dict(color='darkblue', width=2),
-                    yaxis="y"
+                    yaxis="y2"
                 ))
                 
-                # 右轴数据
+                # 有效节律光谱 - 右轴（归一化）
                 nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
                     nz_weighted_normalized = nz_weighted / max(nz_weighted)
@@ -1175,6 +1177,7 @@ def main():
                         yaxis="y2"
                     ))
                 
+                # V(λ) 明视觉 - 右轴（归一化）
                 v_max_val = max(v_lambda)
                 if v_max_val > 0:
                     v_normalized = np.array(v_lambda) / v_max_val
@@ -1186,13 +1189,13 @@ def main():
                         yaxis="y2"
                     ))
                 
-                # 简单的布局设置
+                # 布局设置
                 fig.update_layout(
                     title=t['chart_title'],
                     xaxis_title=t['chart_xlabel'],
-                    yaxis_title="功率 (W/m²/nm)",
+                    yaxis_title="原始功率 (W/m²/nm)",
                     yaxis2=dict(
-                        title="归一化灵敏度",
+                        title="归一化值 (0-1)",
                         overlaying="y",
                         side="right"
                     ),
