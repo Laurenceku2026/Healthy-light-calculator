@@ -472,32 +472,40 @@ def admin_dialog():
     # 加载当前数据
     current_v, current_nz = load_spectral_data()
     
-    # 创建 DataFrame 用于编辑
-    df = pd.DataFrame({
+    # 创建初始 DataFrame
+    df_initial = pd.DataFrame({
         '波长 (nm)': STANDARD_WAVELENGTHS,
         'V(λ) 明视觉': current_v,
         'Nz(λ) 黑视素': current_nz
     })
     
+    # 使用 session_state 持久化编辑数据
+    if "admin_df" not in st.session_state:
+        st.session_state.admin_df = df_initial.copy()
+    
     # ========== 粘贴数据区域 ==========
     st.subheader("📋 快速粘贴数据")
-    st.caption("💡 从 Excel 复制 81 行数据，粘贴到下方文本框，点击按钮即可整列替换")
+    st.caption("💡 从 Excel 复制整列数据，粘贴到下方文本框，点击按钮即可替换")
     
     col_paste1, col_paste2 = st.columns(2)
     
     with col_paste1:
         st.markdown("**V(λ) 明视觉数据**")
-        v_paste = st.text_area(
-            "",
-            height=200,
-            key="paste_v",
-            placeholder="0.000039\n0.000064\n0.000120\n0.000217\n...（共81行）"
-        )
+        v_paste = st.text_area("", height=150, key="paste_v", 
+                               placeholder="从 Excel 复制一列 81 个数字，粘贴到这里")
         if st.button("📋 替换 V(λ) 列", key="apply_v", use_container_width=True):
             try:
-                values = [float(x.strip()) for x in v_paste.strip().split('\n') if x.strip()]
+                # 支持多种分隔符：换行、逗号、空格
+                text = v_paste.strip()
+                if ',' in text:
+                    values = [float(x.strip()) for x in text.split(',') if x.strip()]
+                elif ' ' in text and '\n' not in text:
+                    values = [float(x.strip()) for x in text.split() if x.strip()]
+                else:
+                    values = [float(x.strip()) for x in text.split('\n') if x.strip()]
+                
                 if len(values) == len(STANDARD_WAVELENGTHS):
-                    df['V(λ) 明视觉'] = values
+                    st.session_state.admin_df['V(λ) 明视觉'] = values
                     st.success(f"✅ 已更新 {len(values)} 个数据")
                     st.rerun()
                 else:
@@ -507,17 +515,20 @@ def admin_dialog():
     
     with col_paste2:
         st.markdown("**Nz(λ) 黑视素数据**")
-        nz_paste = st.text_area(
-            "",
-            height=200,
-            key="paste_nz",
-            placeholder="0.000000\n0.000000\n0.000000\n0.000000\n...（共81行）"
-        )
+        nz_paste = st.text_area("", height=150, key="paste_nz",
+                               placeholder="从 Excel 复制一列 81 个数字，粘贴到这里")
         if st.button("📋 替换 Nz(λ) 列", key="apply_nz", use_container_width=True):
             try:
-                values = [float(x.strip()) for x in nz_paste.strip().split('\n') if x.strip()]
+                text = nz_paste.strip()
+                if ',' in text:
+                    values = [float(x.strip()) for x in text.split(',') if x.strip()]
+                elif ' ' in text and '\n' not in text:
+                    values = [float(x.strip()) for x in text.split() if x.strip()]
+                else:
+                    values = [float(x.strip()) for x in text.split('\n') if x.strip()]
+                
                 if len(values) == len(STANDARD_WAVELENGTHS):
-                    df['Nz(λ) 黑视素'] = values
+                    st.session_state.admin_df['Nz(λ) 黑视素'] = values
                     st.success(f"✅ 已更新 {len(values)} 个数据")
                     st.rerun()
                 else:
@@ -526,7 +537,7 @@ def admin_dialog():
                 st.error(f"解析失败: {e}")
     
     st.markdown("---")
-    st.caption("💡 提示：也可以直接在下方表格中双击编辑或粘贴数据")
+    st.caption("💡 提示：也可以直接在下方表格中编辑，数据会自动保存")
     
     # ========== 实时图表预览 ==========
     st.subheader("📈 光谱曲线预览（实时更新）")
@@ -556,14 +567,19 @@ def admin_dialog():
     # ========== 数据编辑表格 ==========
     st.subheader("📊 光谱数据编辑")
     
+    # 使用 session_state 中的数据，确保编辑后不会丢失
     edited_df = st.data_editor(
-        df,
+        st.session_state.admin_df,
         use_container_width=True,
         height=500,
         num_rows="fixed",
         key="admin_data_editor"
     )
     
+    # 更新 session_state
+    st.session_state.admin_df = edited_df
+    
+    # 更新图表
     chart_placeholder.plotly_chart(update_chart(edited_df), use_container_width=True)
     
     # ========== 批量操作 ==========
@@ -571,16 +587,12 @@ def admin_dialog():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        template_df = pd.DataFrame({
-            '波长 (nm)': STANDARD_WAVELENGTHS,
-            'V(λ) 明视觉': DEFAULT_V_LAMBDA,
-            'Nz(λ) 黑视素': DEFAULT_NZ_LAMBDA
-        })
-        csv_data = template_df.to_csv(index=False).encode('utf-8')
+        # 下载当前数据
+        csv_data = edited_df.to_csv(index=False).encode('utf-8')
         st.download_button(
-            label="📥 下载预设模板 (CSV)",
+            label="📥 下载当前数据 (CSV)",
             data=csv_data,
-            file_name="spectral_template.csv",
+            file_name="spectral_data.csv",
             mime="text/csv",
             use_container_width=True
         )
@@ -619,17 +631,10 @@ def admin_dialog():
                     v_interp = interpolate_linear(wl_upload, v_upload, STANDARD_WAVELENGTHS)
                     nz_interp = interpolate_linear(wl_upload, nz_upload, STANDARD_WAVELENGTHS)
                     
-                    new_df = pd.DataFrame({
-                        '波长 (nm)': STANDARD_WAVELENGTHS,
-                        'V(λ) 明视觉': v_interp,
-                        'Nz(λ) 黑视素': nz_interp
-                    })
+                    st.session_state.admin_df['V(λ) 明视觉'] = v_interp
+                    st.session_state.admin_df['Nz(λ) 黑视素'] = nz_interp
                     st.success(f"✅ 已加载并插值到 5nm 网格")
-                    st.dataframe(new_df.head(), use_container_width=True)
-                    
-                    if st.button("📋 应用上传数据到表格", use_container_width=True):
-                        st.session_state.admin_data_editor = new_df.to_dict('records')
-                        st.rerun()
+                    st.rerun()
                 else:
                     st.error("无法识别列名，请确保包含：波长(nm), V(λ) 明视觉, Nz(λ) 黑视素")
             except Exception as e:
@@ -638,13 +643,12 @@ def admin_dialog():
     with col3:
         if st.button("🔄 重置为预设数据", use_container_width=True):
             v, nz = reset_to_default()
-            st.success("已重置为 CIE S026 标准数据")
-            new_df = pd.DataFrame({
+            st.session_state.admin_df = pd.DataFrame({
                 '波长 (nm)': STANDARD_WAVELENGTHS,
                 'V(λ) 明视觉': v,
                 'Nz(λ) 黑视素': nz
             })
-            st.session_state.admin_data_editor = new_df.to_dict('records')
+            st.success("已重置为 CIE S026 标准数据")
             st.rerun()
     
     # ========== 保存按钮 ==========
@@ -653,15 +657,19 @@ def admin_dialog():
     
     with col_save:
         if st.button("💾 保存到系统", type="primary", use_container_width=True):
-            v_lambda_save = edited_df['V(λ) 明视觉'].tolist()
-            nz_lambda_save = edited_df['Nz(λ) 黑视素'].tolist()
+            v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
+            nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
             save_spectral_data(v_lambda_save, nz_lambda_save)
             st.success("✅ 数据已保存！应用将使用新数据进行计算")
+            # 清除 session_state 中的缓存
+            del st.session_state.admin_df
             st.session_state.admin_authenticated = False
             st.rerun()
     
     with col_cancel:
         if st.button("❌ 取消", use_container_width=True):
+            if "admin_df" in st.session_state:
+                del st.session_state.admin_df
             st.session_state.admin_authenticated = False
             st.rerun()
 
