@@ -1003,86 +1003,75 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                                # 双 Y 轴光谱可视化
+                                                                # 双 Y 轴光谱可视化 - 使用 make_subplots
                 st.subheader(t['vis_title'])
                 
-                fig = go.Figure()
+                from plotly.subplots import make_subplots
+                
+                # 创建双 Y 轴子图
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
                 
                 # 1. 原始数据（散点图，左 Y 轴）
-                fig.add_trace(go.Scatter(
-                    x=wl_input, y=power_input, 
-                    mode='markers', 
-                    name=t['vis_original'].format(step_in),
-                    marker=dict(color='orange', size=6, symbol='circle')
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=wl_input, y=power_input, 
+                        mode='markers', 
+                        name=t['vis_original'].format(step_in),
+                        marker=dict(color='orange', size=6, symbol='circle')
+                    ),
+                    secondary_y=False
+                )
                 
                 # 2. 插值后光谱（左 Y 轴）
-                fig.add_trace(go.Scatter(
-                    x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
-                    mode='lines', 
-                    name=t['vis_interp'],
-                    line=dict(color='#1f77b4', width=2.5)
-                ))
+                fig.add_trace(
+                    go.Scatter(
+                        x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
+                        mode='lines', 
+                        name=t['vis_interp'],
+                        line=dict(color='#1f77b4', width=2.5)
+                    ),
+                    secondary_y=False
+                )
                 
-                # 3. 有效节律光谱 SPD × Nz(λ)（左 Y 轴）
+                # 3. 有效节律光谱（左 Y 轴）
                 nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
-                    fig.add_trace(go.Scatter(
-                        x=STANDARD_WAVELENGTHS, y=nz_weighted, 
-                        mode='lines', 
-                        name=t['vis_weighted'],
-                        line=dict(color='#2ca02c', dash='dash', width=2)
-                    ))
+                    fig.add_trace(
+                        go.Scatter(
+                            x=STANDARD_WAVELENGTHS, y=nz_weighted, 
+                            mode='lines', 
+                            name=t['vis_weighted'],
+                            line=dict(color='#2ca02c', dash='dash', width=2)
+                        ),
+                        secondary_y=False
+                    )
                 
-                # 4. 明视觉光谱 V(λ) - 使用右 Y 轴
+                # 4. 明视觉光谱 V(λ) - 右 Y 轴
                 v_max_val = max(v_lambda)
                 if v_max_val > 0:
                     v_normalized = np.array(v_lambda) / v_max_val
-                    fig.add_trace(go.Scatter(
-                        x=STANDARD_WAVELENGTHS, y=v_normalized, 
-                        mode='lines', 
-                        name=t['vis_vlambda'],
-                        line=dict(color='#d62728', dash='dot', width=2.5),
-                        yaxis="y2"
-                    ))
+                    fig.add_trace(
+                        go.Scatter(
+                            x=STANDARD_WAVELENGTHS, y=v_normalized, 
+                            mode='lines', 
+                            name=t['vis_vlambda'],
+                            line=dict(color='#d62728', dash='dot', width=2.5)
+                        ),
+                        secondary_y=True
+                    )
                 
-                # 5. 配置布局 - 使用 make_subplots 的方式更可靠
+                # 设置坐标轴标题
+                fig.update_xaxes(title_text=t['chart_xlabel'])
+                fig.update_yaxes(title_text="功率 / 节律响应 (W/m²/nm)", secondary_y=False, titlefont_color="#1f77b4", tickfont_color="#1f77b4")
+                fig.update_yaxes(title_text="明视觉灵敏度 V(λ) (归一化)", secondary_y=True, titlefont_color="#d62728", tickfont_color="#d62728", showgrid=False)
+                
+                # 设置整体布局
                 fig.update_layout(
-                    title=t['chart_title'],
-                    xaxis=dict(
-                        title=t['chart_xlabel'],
-                        tickmode='linear',
-                        dtick=50,
-                        range=[380, 780]
-                    ),
-                    yaxis=dict(
-                        title="功率 / 节律响应 (W/m²/nm)",
-                        titlefont=dict(color="#1f77b4"),
-                        tickfont=dict(color="#1f77b4")
-                    ),
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="center",
-                        x=0.5
-                    ),
+                    title_text=t['chart_title'],
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                     template="plotly_white",
                     hovermode='x unified',
                     height=550
-                )
-                
-                # 单独添加右 Y 轴（使用 update_layout 的 yaxis2 参数）
-                fig.update_layout(
-                    yaxis2=dict(
-                        title="明视觉灵敏度 V(λ) (归一化)",
-                        overlaying="y",
-                        side="right",
-                        showgrid=False,
-                        range=[0, 1.05],
-                        titlefont=dict(color="#d62728"),
-                        tickfont=dict(color="#d62728")
-                    )
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
