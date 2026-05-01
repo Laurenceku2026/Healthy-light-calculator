@@ -330,7 +330,7 @@ def interpolate_linear(x_input, y_input, x_target):
     return np.interp(x_target, x_input, y_input, left=0, right=0)
 
 # ==================== EML 计算 ====================
-def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
+def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False, lang="zh"):
     """计算 EML 和 m-EDI"""
     spectrum = np.asarray(spectrum_w_m2_nm)
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
@@ -349,26 +349,48 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     medi = eml * 0.9063
     
     if debug:
-        st.write("### 🔍 调试信息")
-        st.write(f"标准网格: {wavelengths[0]}-{wavelengths[-1]} nm, 步长 {STANDARD_DELTA} nm")
-        st.write("---")
-        st.write("**V(λ) 和 Nz(λ) 数据检查（理论值：∫V=106.86，∫Nz=1.0）**")
-        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
-        st.write(f"∫ Nz(λ) dλ = {trapezoid(nz_lambda, wavelengths):.4f}")
-        st.write("---")
-        st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
-        st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
-        st.write(f"Nz(λ) 最大值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
-        st.write("---")
-        st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
-        st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
-        st.write("---")
-        st.write(f"动态 EML_CONSTANT = {eml_constant:.2f}")
-        st.write(f"KM = {KM}")
-        st.write(f"视觉照度 = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
-        st.write(f"EML = {eml_constant:.2f} × {integral_nz:.6e} = {eml:.2f} lx")
-        st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
-        st.write("===================")
+        if lang == "zh":
+            st.write("### 🔍 调试信息")
+            st.write(f"标准网格: {wavelengths[0]}-{wavelengths[-1]} nm, 步长 {STANDARD_DELTA} nm")
+            st.write("---")
+            st.write("**V(λ) 和 Nz(λ) 数据检查（理论值：∫V=106.86，∫Nz=1.0）**")
+            st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
+            st.write(f"∫ Nz(λ) dλ = {trapezoid(nz_lambda, wavelengths):.4f}")
+            st.write("---")
+            st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
+            st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
+            st.write(f"Nz(λ) 最大值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
+            st.write("---")
+            st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
+            st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
+            st.write("---")
+            st.write(f"动态 EML_CONSTANT = {eml_constant:.2f}")
+            st.write(f"KM = {KM}")
+            st.write(f"视觉照度 = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
+            st.write(f"EML = {eml_constant:.2f} × {integral_nz:.6e} = {eml:.2f} lx")
+            st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
+            st.write("===================")
+        else:
+            st.write("### 🔍 Debug Info")
+            st.write(f"Standard grid: {wavelengths[0]}-{wavelengths[-1]} nm, step {STANDARD_DELTA} nm")
+            st.write("---")
+            st.write("**V(λ) and Nz(λ) data check (theoretical: ∫V=106.86, ∫Nz=1.0)**")
+            st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f}")
+            st.write(f"∫ Nz(λ) dλ = {trapezoid(nz_lambda, wavelengths):.4f}")
+            st.write("---")
+            st.write(f"Max spectrum: {np.max(spectrum):.6f} W/m²/nm")
+            st.write(f"V(λ) max: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
+            st.write(f"Nz(λ) max: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
+            st.write("---")
+            st.write(f"∫ E(λ) × V(λ) dλ = {integral_v:.6e}")
+            st.write(f"∫ E(λ) × Nz(λ) dλ = {integral_nz:.6e}")
+            st.write("---")
+            st.write(f"Dynamic EML_CONSTANT = {eml_constant:.2f}")
+            st.write(f"KM = {KM}")
+            st.write(f"Illuminance = {KM} × {integral_v:.6e} = {illuminance:.2f} lx")
+            st.write(f"EML = {eml_constant:.2f} × {integral_nz:.6e} = {eml:.2f} lx")
+            st.write(f"m-EDI = EML × 0.9063 = {medi:.2f} lx")
+            st.write("===================")
     
     return eml, medi, illuminance
 
@@ -474,6 +496,19 @@ def admin_dialog():
     # 使用 session_state 持久化编辑数据
     if "admin_df" not in st.session_state:
         st.session_state.admin_df = df_initial.copy()
+    
+    # ========== 调试信息区域 ==========
+    with st.expander("🔧 调试信息"):
+        st.caption("用于排查保存问题")
+        if st.button("📂 查看保存状态", key="debug_status"):
+            st.write(f"**保存路径:** `{SPECTRAL_DATA_FILE}`")
+            st.write(f"**文件是否存在:** {os.path.exists(SPECTRAL_DATA_FILE)}")
+            if os.path.exists(SPECTRAL_DATA_FILE):
+                st.write(f"**文件大小:** {os.path.getsize(SPECTRAL_DATA_FILE)} bytes")
+                st.write(f"**最后修改时间:** {datetime.fromtimestamp(os.path.getmtime(SPECTRAL_DATA_FILE))}")
+            st.write(f"**当前 session_state 中的数据点数:** {len(st.session_state.admin_df)}")
+            st.write(f"**V(λ) 前3个值:** {st.session_state.admin_df['V(λ) 明视觉'].head(3).tolist()}")
+            st.write(f"**Nz(λ) 前3个值:** {st.session_state.admin_df['Nz(λ) 黑视素'].head(3).tolist()}")
     
     # ========== 实时图表预览 ==========
     st.subheader("📈 光谱曲线预览（实时更新）")
@@ -647,11 +682,11 @@ def admin_dialog():
             st.success("已重置为 CIE S026 标准数据")
             st.rerun()
     
-    # ========== 保存按钮 ==========
+    # ========== 保存按钮（分离保存和关闭）==========
     st.markdown("---")
-    st.caption("💡 点击保存后数据将写入本地文件")
+    st.caption("💡 点击保存后数据写入本地文件，然后手动关闭对话框")
     
-    col_save, col_cancel = st.columns(2)
+    col_save, col_close = st.columns(2)
     
     with col_save:
         if st.button("💾 保存到系统", type="primary", use_container_width=True):
@@ -661,16 +696,12 @@ def admin_dialog():
             if save_spectral_data(v_lambda_save, nz_lambda_save):
                 st.success("✅ 数据已保存到本地文件！")
                 st.balloons()
-                # 清除缓存，退出管理员模式
-                if "admin_df" in st.session_state:
-                    del st.session_state.admin_df
-                st.session_state.admin_authenticated = False
-                st.rerun()
+                # 不清除认证，不退出，让用户手动关闭
             else:
                 st.error("❌ 保存失败，请检查日志")
     
-    with col_cancel:
-        if st.button("❌ 取消", use_container_width=True):
+    with col_close:
+        if st.button("❌ 关闭", use_container_width=True):
             if "admin_df" in st.session_state:
                 del st.session_state.admin_df
             st.session_state.admin_authenticated = False
@@ -934,7 +965,7 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 <table>
     <thead><tr><th>{t['well_table_header']}</th><th>{t['well_eml_requirement']}</th><th>{t['well_status']}</th></tr></thead>
     <tbody>{well_rows}</tbody>
-</table>
+<tr>
 
 <h2>{t['vis_title']}</h2>
 <div class="spectrum-container">{fig_html}</div>
@@ -1083,7 +1114,7 @@ def main():
                 
                 debug_mode = st.session_state.get("debug_mode", False)
                 eml, medi, lux = calculate_eml_and_medi(
-                    scaled_spectrum, v_lambda, nz_lambda, debug=debug_mode
+                    scaled_spectrum, v_lambda, nz_lambda, debug=debug_mode, lang=lang
                 )
                 well_results = get_well_comparison(eml)
                 
