@@ -1215,43 +1215,65 @@ def main():
                 st.subheader(t['vis_title'])
                 
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=wl_input, y=power_input, 
-                    mode='markers', name=t['vis_original'].format(step_in),
-                    marker=dict(color='orange', size=6, symbol='circle')
-                ))
-                fig.add_trace(go.Scatter(
-                    x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
-                    mode='lines', name=t['vis_interp'],
-                    line=dict(color='darkblue', width=2)
-                ))
-                
-                v_max = max(v_lambda)
-                if v_max > 0 and max(scaled_spectrum) > 0:
-                    v_scaled = np.array(v_lambda) / v_max * max(scaled_spectrum) * 0.6
-                    fig.add_trace(go.Scatter(
-                        x=STANDARD_WAVELENGTHS, y=v_scaled, 
-                        mode='lines', name=t['vis_vlambda'],
-                        line=dict(color='red', dash='dot', width=2)
-                    ))
-                
-                nz_weighted = scaled_spectrum * nz_lambda
-                if max(nz_weighted) > 0:
-                    fig.add_trace(go.Scatter(
-                        x=STANDARD_WAVELENGTHS, y=nz_weighted, 
-                        mode='lines', name=t['vis_weighted'],
-                        line=dict(color='green', dash='dash', width=2)
-                    ))
-                
-                fig.update_layout(
-                    title=t['chart_title'],
-                    xaxis_title=t['chart_xlabel'],
-                    yaxis_title=t['chart_ylabel'],
-                    legend_title="Spectrum Type",
-                    template="plotly_white",
-                    hovermode='x unified',
-                    height=500
-                )
+
+# 添加原始数据（左 Y 轴）
+fig.add_trace(go.Scatter(
+    x=wl_input, y=power_input, 
+    mode='markers', name=t['vis_original'].format(step_in),
+    marker=dict(color='orange', size=6, symbol='circle')
+))
+
+# 添加插值光谱（左 Y 轴）
+fig.add_trace(go.Scatter(
+    x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
+    mode='lines', name=t['vis_interp'],
+    line=dict(color='darkblue', width=2)
+))
+
+# 添加有效节律光谱（左 Y 轴）
+nz_weighted = scaled_spectrum * nz_lambda
+if max(nz_weighted) > 0:
+    fig.add_trace(go.Scatter(
+        x=STANDARD_WAVELENGTHS, y=nz_weighted, 
+        mode='lines', name=t['vis_weighted'],
+        line=dict(color='green', dash='dash', width=2)
+    ))
+
+# 明视觉光谱 V(λ) - 使用右 Y 轴（归一化到 0-1 范围）
+v_max = max(v_lambda)
+if v_max > 0:
+    # V(λ) 保持原始归一化值 (0-1 范围)
+    v_normalized = np.array(v_lambda)
+    fig.add_trace(go.Scatter(
+        x=STANDARD_WAVELENGTHS, y=v_normalized, 
+        mode='lines', name=t['vis_vlambda'],
+        line=dict(color='red', dash='dot', width=2),
+        yaxis="y2"  # 指定使用右 Y 轴
+    ))
+
+# 更新布局：双 Y 轴
+fig.update_layout(
+    title=t['chart_title'],
+    xaxis_title=t['chart_xlabel'],
+    yaxis_title="功率 / 节律响应 (W/m²/nm)",
+    legend_title="Spectrum Type",
+    template="plotly_white",
+    hovermode='x unified',
+    height=500,
+    # 右 Y 轴配置
+    yaxis2=dict(
+        title="明视觉灵敏度 V(λ) (归一化)",
+        overlaying="y",  # 覆盖在左 Y 轴上
+        side="right",     # 显示在右侧
+        showgrid=False,   # 不显示网格线（避免混乱）
+        rangemode="tozero",  # 从0开始
+        titlefont=dict(color="red"),
+        tickfont=dict(color="red")
+    )
+)
+
+# 可选：调整左 Y 轴颜色
+fig.update_yaxes(titlefont=dict(color="darkblue"), tickfont=dict(color="darkblue"))
                 st.plotly_chart(fig, use_container_width=True)
                 
                 with st.expander(t['data_note_title']):
