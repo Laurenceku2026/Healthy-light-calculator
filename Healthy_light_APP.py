@@ -1273,7 +1273,7 @@ fig.update_layout(
 )
 
 # 可选：调整左 Y 轴颜色
-        fig.update_yaxes(titlefont=dict(color="darkblue"), tickfont=dict(color="darkblue"))
+    fig.update_yaxes(titlefont=dict(color="darkblue"), tickfont=dict(color="darkblue"))
             st.plotly_chart(fig, use_container_width=True)
                 
                 with st.expander(t['data_note_title']):
