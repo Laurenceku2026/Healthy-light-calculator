@@ -20,10 +20,6 @@ KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 STANDARD_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm，步长5nm
 STANDARD_DELTA = 5.0  # 标准网格步长 (nm)
 
-# ==================== 文件路径 ====================
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-SPECTRAL_DATA_FILE = os.path.join(SCRIPT_DIR, "spectral_data.json")
-
 # ==================== Supabase 配置 ====================
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -73,11 +69,12 @@ def get_user_profile(user_id: str):
             return {
                 "subscription_tier": data.get("subscription_tier", "free"),
                 "free_trials_remaining": data.get("free_trials_remaining", 30),
-                "subscription_expires_at": data.get("subscription_expires_at")
+                "subscription_expires_at": data.get("subscription_expires_at"),
+                "spectral_data": data.get("spectral_data")
             }
     except Exception:
         pass
-    return {"subscription_tier": "free", "free_trials_remaining": 30, "subscription_expires_at": None}
+    return {"subscription_tier": "free", "free_trials_remaining": 30, "subscription_expires_at": None, "spectral_data": None}
 
 def get_user_remaining_trials(user_id: str) -> int:
     try:
@@ -207,25 +204,29 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== 光谱数据管理（本地 JSON 文件 + 自动积分归一化）====================
+# ==================== 光谱数据管理（Supabase 存储 + 自动积分归一化）====================
 def load_spectral_data(debug=False):
-    """加载光谱数据，优先从 JSON 文件读取，否则使用预设数据，并自动积分归一化 Nz(λ)"""
-    if os.path.exists(SPECTRAL_DATA_FILE):
+    """从 Supabase 加载光谱数据，否则使用预设数据，并自动积分归一化 Nz(λ)"""
+    user_id = st.session_state.get("user_id", "")
+    v_lambda = DEFAULT_V_LAMBDA
+    nz_lambda = DEFAULT_NZ_LAMBDA
+    
+    # 尝试从 Supabase 加载
+    if user_id and user_id != "admin":
         try:
-            with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                v_lambda = data.get('v_lambda', DEFAULT_V_LAMBDA)
-                nz_lambda = data.get('nz_lambda', DEFAULT_NZ_LAMBDA)
-            if debug:
-                st.info(f"📂 从文件加载数据: {SPECTRAL_DATA_FILE}")
+            response = supabase_get("profiles", user_id)
+            if response.status_code == 200 and response.json():
+                data = response.json()[0]
+                spectral_data = data.get("spectral_data")
+                if spectral_data:
+                    saved = json.loads(spectral_data)
+                    v_lambda = saved.get('v_lambda', DEFAULT_V_LAMBDA)
+                    nz_lambda = saved.get('nz_lambda', DEFAULT_NZ_LAMBDA)
+                    if debug:
+                        st.info("📂 从数据库加载光谱数据")
         except Exception as e:
             if debug:
                 st.warning(f"加载失败，使用预设数据: {e}")
-            v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
-    else:
-        if debug:
-            st.info("📂 文件不存在，使用预设数据")
-        v_lambda, nz_lambda = DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
     
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
@@ -268,27 +269,26 @@ def load_spectral_data(debug=False):
     return v_lambda, nz_lambda
 
 def save_spectral_data(v_lambda, nz_lambda):
-    """保存光谱数据到 JSON 文件"""
+    """保存光谱数据到 Supabase"""
+    user_id = st.session_state.get("user_id", "")
+    if not user_id or user_id == "admin":
+        return False
+    
     try:
         data = {
             'v_lambda': [float(x) for x in v_lambda],
             'nz_lambda': [float(x) for x in nz_lambda],
             'last_updated': datetime.now().isoformat()
         }
-        
-        with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        return True
+        response = supabase_patch("profiles", user_id, {"spectral_data": json.dumps(data)})
+        return response.status_code in [200, 204]
     except Exception as e:
         print(f"保存失败: {e}")
         return False
 
 def reset_to_default():
-    """重置为预设数据"""
-    if os.path.exists(SPECTRAL_DATA_FILE):
-        os.remove(SPECTRAL_DATA_FILE)
-    return DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA
+    """重置为预设数据（保存到 Supabase）"""
+    return save_spectral_data(DEFAULT_V_LAMBDA, DEFAULT_NZ_LAMBDA)
 
 # ==================== 插值函数 ====================
 def interpolate_energy_conserving(x_input, y_input, x_target):
@@ -497,19 +497,6 @@ def admin_dialog():
     if "admin_df" not in st.session_state:
         st.session_state.admin_df = df_initial.copy()
     
-    # ========== 调试信息区域 ==========
-    with st.expander("🔧 调试信息"):
-        st.caption("用于排查保存问题")
-        if st.button("📂 查看保存状态", key="debug_status"):
-            st.write(f"**保存路径:** `{SPECTRAL_DATA_FILE}`")
-            st.write(f"**文件是否存在:** {os.path.exists(SPECTRAL_DATA_FILE)}")
-            if os.path.exists(SPECTRAL_DATA_FILE):
-                st.write(f"**文件大小:** {os.path.getsize(SPECTRAL_DATA_FILE)} bytes")
-                st.write(f"**最后修改时间:** {datetime.fromtimestamp(os.path.getmtime(SPECTRAL_DATA_FILE))}")
-            st.write(f"**当前 session_state 中的数据点数:** {len(st.session_state.admin_df)}")
-            st.write(f"**V(λ) 前3个值:** {st.session_state.admin_df['V(λ) 明视觉'].head(3).tolist()}")
-            st.write(f"**Nz(λ) 前3个值:** {st.session_state.admin_df['Nz(λ) 黑视素'].head(3).tolist()}")
-    
     # ========== 实时图表预览 ==========
     st.subheader("📈 光谱曲线预览（实时更新）")
     chart_placeholder = st.empty()
@@ -673,18 +660,20 @@ def admin_dialog():
     
     with col3:
         if st.button("🔄 重置为预设数据", use_container_width=True):
-            reset_to_default()
-            st.session_state.admin_df = pd.DataFrame({
-                '波长 (nm)': STANDARD_WAVELENGTHS,
-                'V(λ) 明视觉': DEFAULT_V_LAMBDA,
-                'Nz(λ) 黑视素': DEFAULT_NZ_LAMBDA
-            })
-            st.success("已重置为 CIE S026 标准数据")
-            st.rerun()
+            if reset_to_default():
+                st.success("已重置为 CIE S026 标准数据")
+                st.session_state.admin_df = pd.DataFrame({
+                    '波长 (nm)': STANDARD_WAVELENGTHS,
+                    'V(λ) 明视觉': DEFAULT_V_LAMBDA,
+                    'Nz(λ) 黑视素': DEFAULT_NZ_LAMBDA
+                })
+                st.rerun()
+            else:
+                st.error("重置失败")
     
     # ========== 保存按钮（分离保存和关闭）==========
     st.markdown("---")
-    st.caption("💡 点击保存后数据写入本地文件，然后手动关闭对话框")
+    st.caption("💡 点击保存后数据写入数据库，然后手动关闭对话框")
     
     col_save, col_close = st.columns(2)
     
@@ -694,7 +683,7 @@ def admin_dialog():
             nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
             
             if save_spectral_data(v_lambda_save, nz_lambda_save):
-                st.success("✅ 数据已保存到本地文件！")
+                st.success("✅ 数据已保存到数据库！")
                 st.balloons()
                 # 不清除认证，不退出，让用户手动关闭
             else:
@@ -965,7 +954,7 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 <table>
     <thead><tr><th>{t['well_table_header']}</th><th>{t['well_eml_requirement']}</th><th>{t['well_status']}</th></tr></thead>
     <tbody>{well_rows}</tbody>
-<tr>
+</table>
 
 <h2>{t['vis_title']}</h2>
 <div class="spectrum-container">{fig_html}</div>
