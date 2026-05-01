@@ -20,9 +20,6 @@ KM = 683.002  # 明视觉最大光谱光视效能 (lm/W)
 STANDARD_WAVELENGTHS = list(range(380, 781, 5))  # 380-780nm，步长5nm
 STANDARD_DELTA = 5.0  # 标准网格步长 (nm)
 
-# CIE S026:2018 标准离散积分值（5nm 网格）
-TARGET_INTEGRAL_V = 89.4
-
 # ==================== Supabase 配置 ====================
 try:
     SUPABASE_URL = st.secrets["SUPABASE_URL"]
@@ -209,13 +206,9 @@ def trapezoid(y, x):
             dx = np.diff(x)
             return np.sum((y[:-1] + y[1:]) * dx / 2)
 
-# ==================== 光谱数据管理（自动修正 V(λ) 积分值）====================
+# ==================== 光谱数据管理（积分归一化）====================
 def load_spectral_data(debug=False):
-    """
-    加载光谱数据
-    V(λ) 保持峰值归一化（物理定义）
-    Nz(λ) 进行积分归一化（CIE S026 标准要求 ∫Nz dλ = 1.0）
-    """
+    """加载光谱数据，Nz(λ) 进行积分归一化（CIE S026 标准要求 ∫Nz dλ = 1.0）"""
     if os.path.exists(SPECTRAL_DATA_FILE):
         try:
             with open(SPECTRAL_DATA_FILE, 'r', encoding='utf-8') as f:
@@ -229,7 +222,7 @@ def load_spectral_data(debug=False):
     
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
-    # V(λ)：峰值归一化到 1.0（保持不变）
+    # V(λ)：峰值归一化到 1.0（物理定义）
     v_array = np.asarray(v_lambda)
     v_max = np.max(v_array)
     if abs(v_max - 1.0) > 0.01:
@@ -246,25 +239,23 @@ def load_spectral_data(debug=False):
         nz_lambda = (nz_array * scale_factor).tolist()
         if debug:
             st.info(f"🔧 Nz(λ) 积分归一化: ∫Nz {current_integral_nz:.4f} → 1.0 (因子 {scale_factor:.4f})")
-    else:
-        # 即使积分正确，也确保峰值显示（仅用于调试）
-        if debug:
-            nz_max = np.max(nz_array)
-            st.info(f"📊 Nz(λ) 峰值: {nz_max:.4f} @ {wavelengths[np.argmax(nz_array)]} nm")
     
     if debug:
         v_array = np.asarray(v_lambda)
+        nz_array = np.asarray(nz_lambda)
         integral_v = trapezoid(v_array, wavelengths)
+        integral_nz = trapezoid(nz_array, wavelengths)
+        st.info(f"📊 V(λ) 峰值: {np.max(v_array):.4f} @ {wavelengths[np.argmax(v_array)]} nm")
         st.info(f"📊 V(λ) 积分值: {integral_v:.4f}")
-        st.info(f"📊 Nz(λ) 积分值: {trapezoid(np.asarray(nz_lambda), wavelengths):.4f}")
+        st.info(f"📊 Nz(λ) 积分值: {integral_nz:.4f}")
     
     return v_lambda, nz_lambda
 
 def save_spectral_data(v_lambda, nz_lambda):
     """保存光谱数据到 JSON 文件"""
     data = {
-        'v_lambda': v_lambda,
-        'nz_lambda': nz_lambda,
+        'v_lambda': [float(x) for x in v_lambda],
+        'nz_lambda': [float(x) for x in nz_lambda],
         'last_updated': datetime.now().isoformat()
     }
     with open(SPECTRAL_DATA_FILE, 'w', encoding='utf-8') as f:
@@ -278,10 +269,7 @@ def reset_to_default():
 
 # ==================== 插值函数 ====================
 def interpolate_energy_conserving(x_input, y_input, x_target):
-    """
-    能量守恒插值 - 用于用户光谱数据
-    保持原始光谱的总能量不变
-    """
+    """能量守恒插值 - 用于用户光谱数据"""
     x_input = np.asarray(x_input)
     y_input = np.asarray(y_input)
     x_target = np.asarray(x_target)
@@ -289,25 +277,19 @@ def interpolate_energy_conserving(x_input, y_input, x_target):
     if len(x_input) < 2 or len(y_input) < 2:
         return np.zeros_like(x_target)
     
-    # 计算原始数据每点的带宽
     dx_input = np.zeros_like(x_input)
     dx_input[0] = x_input[1] - x_input[0]
     dx_input[1:-1] = (x_input[2:] - x_input[:-2]) / 2
     dx_input[-1] = x_input[-1] - x_input[-2]
     
-    # 转换为能量 (W/m²)
     energy_input = y_input * dx_input
-    
-    # 插值能量到目标网格
     energy_target = np.interp(x_target, x_input, energy_input, left=0, right=0)
     
-    # 计算目标网格每点的带宽
     dx_target = np.zeros_like(x_target)
     dx_target[0] = x_target[1] - x_target[0]
     dx_target[1:-1] = (x_target[2:] - x_target[:-2]) / 2
     dx_target[-1] = x_target[-1] - x_target[-2]
     
-    # 转换回功率密度 (W/m²/nm)
     dx_target_safe = np.where(dx_target > 0, dx_target, 1.0)
     y_target = energy_target / dx_target_safe
     
@@ -324,28 +306,21 @@ def interpolate_linear(x_input, y_input, x_target):
     
     return np.interp(x_target, x_input, y_input, left=0, right=0)
 
-# ==================== EML 计算（完全动态适配）====================
+# ==================== EML 计算 ====================
 def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
+    """计算 EML 和 m-EDI"""
     spectrum = np.asarray(spectrum_w_m2_nm)
     wavelengths = np.asarray(STANDARD_WAVELENGTHS)
     
-    # 计算加权光谱
     weighted_melanopic = spectrum * nz_lambda
     weighted_photopic = spectrum * v_lambda
     
-    # 积分
     integral_nz = trapezoid(weighted_melanopic, wavelengths)
     integral_v = trapezoid(weighted_photopic, wavelengths)
     
-    # ========== 新增：计算 V(λ) 和 Nz(λ) 本身的积分 ==========
-    integral_v_spectrum = trapezoid(v_lambda, wavelengths)      # ∫ V(λ) dλ
-    integral_nz_spectrum = trapezoid(nz_lambda, wavelengths)    # ∫ Nz(λ) dλ
-    # ========================================================
-    
-    # 动态计算 EML_CONSTANT
+    integral_v_spectrum = trapezoid(v_lambda, wavelengths)
     eml_constant = KM * integral_v_spectrum
     
-    # 计算结果
     eml = eml_constant * integral_nz
     illuminance = KM * integral_v
     medi = eml * 0.9063
@@ -353,15 +328,11 @@ def calculate_eml_and_medi(spectrum_w_m2_nm, v_lambda, nz_lambda, debug=False):
     if debug:
         st.write("### 🔍 调试信息")
         st.write(f"标准网格: {wavelengths[0]}-{wavelengths[-1]} nm, 步长 {STANDARD_DELTA} nm")
-        
-        # ========== 新增：显示 V(λ) 和 Nz(λ) 的积分值 ==========
         st.write("---")
         st.write("**V(λ) 和 Nz(λ) 数据检查（理论值：∫V=106.86，∫Nz=1.0）**")
-        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f} {'✅' if abs(integral_v_spectrum - 106.86) < 5 else '⚠️ 偏离理论值'}")
-        st.write(f"∫ Nz(λ) dλ = {integral_nz_spectrum:.4f} {'✅' if abs(integral_nz_spectrum - 1.0) < 0.1 else '⚠️ 应为 1.0'}")
-        st.write("（CIE S026 标准：∫V=106.86，∫Nz=1.0）")
-        # =====================================================
-        
+        st.write(f"∫ V(λ) dλ = {integral_v_spectrum:.4f} {'✅' if abs(integral_v_spectrum - 106.86) < 5 else '⚠️'}")
+        st.write(f"∫ Nz(λ) dλ = {trapezoid(nz_lambda, wavelengths):.4f} {'✅' if abs(trapezoid(nz_lambda, wavelengths) - 1.0) < 0.05 else '⚠️'}")
+        st.write("---")
         st.write(f"光谱最大值: {np.max(spectrum):.6f} W/m²/nm")
         st.write(f"V(λ) 最大值: {np.max(v_lambda):.4f} @ {wavelengths[np.argmax(v_lambda)]} nm")
         st.write(f"Nz(λ) 最大值: {np.max(nz_lambda):.4f} @ {wavelengths[np.argmax(nz_lambda)]} nm")
@@ -495,7 +466,6 @@ def admin_dialog():
                                placeholder="从 Excel 复制一列 81 个数字，粘贴到这里")
         if st.button("📋 替换 V(λ) 列", key="apply_v", use_container_width=True):
             try:
-                # 支持多种分隔符：换行、逗号、空格
                 text = v_paste.strip()
                 if ',' in text:
                     values = [float(x.strip()) for x in text.split(',') if x.strip()]
@@ -567,9 +537,16 @@ def admin_dialog():
     # ========== 数据编辑表格 ==========
     st.subheader("📊 光谱数据编辑")
     
-    # 使用 session_state 中的数据，确保编辑后不会丢失
+    # 设置列格式，避免显示空格分隔符
+    column_config = {
+        "波长 (nm)": st.column_config.NumberColumn(format="%d"),
+        "V(λ) 明视觉": st.column_config.NumberColumn(format="%.8f"),
+        "Nz(λ) 黑视素": st.column_config.NumberColumn(format="%.8f"),
+    }
+    
     edited_df = st.data_editor(
         st.session_state.admin_df,
+        column_config=column_config,
         use_container_width=True,
         height=500,
         num_rows="fixed",
@@ -587,7 +564,6 @@ def admin_dialog():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        # 下载当前数据
         csv_data = edited_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 下载当前数据 (CSV)",
@@ -652,46 +628,35 @@ def admin_dialog():
             st.rerun()
     
     # ========== 保存按钮 ==========
-    # ========== 保存按钮 ==========
-st.markdown("---")
-st.caption("💡 点击保存后数据将写入系统，关闭对话框后生效")
-
-col_save, col_cancel = st.columns(2)
-
-with col_save:
-    if st.button("💾 保存到系统", type="primary", use_container_width=True):
-        # 从当前编辑的表格获取数据
-        v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
-        nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
-        
-        # 保存到 JSON 文件
-        save_spectral_data(v_lambda_save, nz_lambda_save)
-        
-        st.success("✅ 数据已保存到系统！")
-        st.balloons()
-        
-        # 重新加载数据确保一致性
-        v_reloaded, nz_reloaded = load_spectral_data()
-        st.session_state.admin_df = pd.DataFrame({
-            '波长 (nm)': STANDARD_WAVELENGTHS,
-            'V(λ) 明视觉': v_reloaded,
-            'Nz(λ) 黑视素': nz_reloaded
-        })
-        
-        # 可选：延迟退出，让用户看到成功消息
-        import time
-        time.sleep(1)
-        st.session_state.admin_authenticated = False
-        if "admin_df" in st.session_state:
-            del st.session_state.admin_df
-        st.rerun()
-
-with col_cancel:
-    if st.button("❌ 取消", use_container_width=True):
-        if "admin_df" in st.session_state:
-            del st.session_state.admin_df
-        st.session_state.admin_authenticated = False
-        st.rerun()
+    st.markdown("---")
+    st.caption("💡 点击保存后数据将写入系统，关闭对话框后生效")
+    
+    col_save, col_cancel = st.columns(2)
+    
+    with col_save:
+        if st.button("💾 保存到系统", type="primary", use_container_width=True):
+            # 从当前编辑的表格获取数据
+            v_lambda_save = st.session_state.admin_df['V(λ) 明视觉'].tolist()
+            nz_lambda_save = st.session_state.admin_df['Nz(λ) 黑视素'].tolist()
+            
+            # 保存到 JSON 文件
+            save_spectral_data(v_lambda_save, nz_lambda_save)
+            
+            st.success("✅ 数据已保存到系统！")
+            st.balloons()
+            
+            # 清除 session_state 缓存，退出管理员模式
+            if "admin_df" in st.session_state:
+                del st.session_state.admin_df
+            st.session_state.admin_authenticated = False
+            st.rerun()
+    
+    with col_cancel:
+        if st.button("❌ 取消", use_container_width=True):
+            if "admin_df" in st.session_state:
+                del st.session_state.admin_df
+            st.session_state.admin_authenticated = False
+            st.rerun()
 
 # ==================== 多语言文本 ====================
 TEXTS = {
@@ -728,7 +693,7 @@ $$m\\text{-}EDI \\approx EML \\times 0.9063$$
         'upload_label': '选项 A: 上传 CSV/TXT 文件',
         'upload_help': '文件应包含两列: 波长(nm), 功率(W/m²/nm)。支持任意步长',
         'textarea_label': '选项 B: 粘贴或输入光谱数据',
-        'textarea_placeholder': '波长(nm),功率(W/m²/nm)\n380 0.0012\n385 0.0021',
+        'textarea_placeholder': '波长(nm),功率(W/m²/nm)\\n380 0.0012\\n385 0.0021',
         'unit_note': '💡 单位说明：功率单位为 W/m²/nm（瓦每平方米每纳米）',
         'calc_btn': '🚀 计算 EML / m-EDI',
         'result_title': '📊 计算结果',
@@ -806,7 +771,7 @@ Where:
         'upload_label': 'Option A: Upload CSV/TXT File',
         'upload_help': 'File should contain two columns: Wavelength(nm), Power(W/m²/nm)',
         'textarea_label': 'Option B: Paste or Enter Spectral Data',
-        'textarea_placeholder': 'Wavelength(nm),Power(W/m²/nm)\n380 0.0012\n385 0.0021',
+        'textarea_placeholder': 'Wavelength(nm),Power(W/m²/nm)\\n380 0.0012\\n385 0.0021',
         'unit_note': '💡 Unit Note: Power unit is W/m²/nm',
         'calc_btn': '🚀 Calculate EML / m-EDI',
         'result_title': '📊 Results',
@@ -948,8 +913,7 @@ def generate_word_report(t, analyst_name, analyst_title, eml, medi, lux,
 <div class="data-note">
     {t['data_note_content'].format(num_points, input_min, input_max, step)}<br>
     标准网格: 380-780 nm，固定步长 5 nm（共 81 个点）<br>
-    插值方法: 能量守恒插值（用户光谱），线性插值（灵敏度函数）<br>
-    V(λ) 积分值已自动修正到标准值 {TARGET_INTEGRAL_V}
+    插值方法: 能量守恒插值（用户光谱），线性插值（灵敏度函数）
 </div>
 
 <div class="footer">{t['footer']}</div>
@@ -1013,7 +977,7 @@ def main():
         
         st.markdown("---")
         st.caption("📊 当前使用的光谱数据")
-        v_lambda, nz_lambda = load_spectral_data(debug=st.session_state.get("debug_mode", False))
+        v_lambda, nz_lambda = load_spectral_data()
         v_peak_idx = np.argmax(v_lambda)
         nz_peak_idx = np.argmax(nz_lambda)
         st.caption(f"标准网格: {STANDARD_WAVELENGTHS[0]}-{STANDARD_WAVELENGTHS[-1]} nm, 步长 {STANDARD_DELTA} nm")
@@ -1047,7 +1011,7 @@ def main():
                 input_min, input_max = wl_input[0], wl_input[-1]
                 st.info(t['detected'].format(input_min, input_max, step_in, len(wl_input)))
                 
-                v_lambda, nz_lambda = load_spectral_data(debug=st.session_state.get("debug_mode", False))
+                v_lambda, nz_lambda = load_spectral_data()
                 interp_spectrum = interpolate_energy_conserving(wl_input, power_input, STANDARD_WAVELENGTHS)
                 
                 debug_mode = st.session_state.get("debug_mode", False)
