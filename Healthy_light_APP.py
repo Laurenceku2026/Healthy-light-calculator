@@ -1003,7 +1003,7 @@ def main():
                 elif eml >= 250:
                     st.success("🎉 恭喜！当前光源已达到 WELL 高品质推荐标准！")
                 
-                                                                # 双 Y 轴光谱可视化 - 使用 make_subplots
+                                                                                # 双 Y 轴光谱可视化
                 st.subheader(t['vis_title'])
                 
                 from plotly.subplots import make_subplots
@@ -1011,7 +1011,7 @@ def main():
                 # 创建双 Y 轴子图
                 fig = make_subplots(specs=[[{"secondary_y": True}]])
                 
-                # 1. 原始数据（散点图，左 Y 轴）
+                # 1. 原始数据
                 fig.add_trace(
                     go.Scatter(
                         x=wl_input, y=power_input, 
@@ -1022,7 +1022,7 @@ def main():
                     secondary_y=False
                 )
                 
-                # 2. 插值后光谱（左 Y 轴）
+                # 2. 插值后光谱
                 fig.add_trace(
                     go.Scatter(
                         x=STANDARD_WAVELENGTHS, y=scaled_spectrum, 
@@ -1033,7 +1033,7 @@ def main():
                     secondary_y=False
                 )
                 
-                # 3. 有效节律光谱（左 Y 轴）
+                # 3. 有效节律光谱
                 nz_weighted = scaled_spectrum * nz_lambda
                 if max(nz_weighted) > 0:
                     fig.add_trace(
@@ -1060,14 +1060,19 @@ def main():
                         secondary_y=True
                     )
                 
-                # 设置坐标轴标题
+                # 设置坐标轴标题（简化版）
                 fig.update_xaxes(title_text=t['chart_xlabel'])
-                fig.update_yaxes(title_text="功率 / 节律响应 (W/m²/nm)", secondary_y=False, titlefont_color="#1f77b4", tickfont_color="#1f77b4")
-                fig.update_yaxes(title_text="明视觉灵敏度 V(λ) (归一化)", secondary_y=True, titlefont_color="#d62728", tickfont_color="#d62728", showgrid=False)
+                fig.update_yaxes(title_text="功率 / 节律响应 (W/m²/nm)", secondary_y=False)
+                fig.update_yaxes(title_text="明视觉灵敏度 V(λ) (归一化)", secondary_y=True)
+                
+                # 设置坐标轴颜色
+                fig.update_yaxes(title_font_color="#1f77b4", tickfont_color="#1f77b4", secondary_y=False)
+                fig.update_yaxes(title_font_color="#d62728", tickfont_color="#d62728", secondary_y=True)
+                fig.update_yaxes(showgrid=False, secondary_y=True)
                 
                 # 设置整体布局
                 fig.update_layout(
-                    title_text=t['chart_title'],
+                    title=t['chart_title'],
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
                     template="plotly_white",
                     hovermode='x unified',
