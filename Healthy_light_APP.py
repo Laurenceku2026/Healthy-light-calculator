@@ -1012,7 +1012,10 @@ def main():
     
     # 顶部按钮
     render_enterprise_main_brand()
-    col_title, col_lang1, col_lang2, col_admin, col_debug = st.columns([5, 0.8, 0.8, 0.8, 0.8])
+    if is_enterprise_user():
+        col_title, col_lang1, col_lang2, col_debug = st.columns([5, 0.8, 0.8, 0.8])
+    else:
+        col_title, col_lang1, col_lang2, col_admin, col_debug = st.columns([5, 0.8, 0.8, 0.8, 0.8])
     
     with col_title:
         st.title("💡 " + t['page_title'])
@@ -1027,9 +1030,10 @@ def main():
             st.session_state.lang = "en"
             st.rerun()
     
-    with col_admin:
-        if st.button("⚙️", key="admin_gear", help="管理员设置", use_container_width=True):
-            admin_dialog()
+    if not is_enterprise_user():
+        with col_admin:
+            if st.button("⚙️", key="admin_gear", help="管理员设置", use_container_width=True):
+                admin_dialog()
     
     with col_debug:
         if st.button("🐛", key="debug_btn", help=t['debug_mode'], use_container_width=True):
