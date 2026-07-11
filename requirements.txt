@@ -3,3 +3,5 @@ pandas
 numpy
 plotly
 kaleido
+requests
+pyjwt>=2.8.0

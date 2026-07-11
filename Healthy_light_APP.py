@@ -10,6 +10,16 @@ from datetime import datetime
 import plotly.io as pio
 import requests
 
+from portal_enterprise_ui import (
+    apply_portal_token,
+    ensure_enterprise_session_defaults,
+    is_enterprise_user,
+    load_enterprise_branding,
+    qp_first,
+    render_enterprise_main_brand,
+    render_enterprise_sidebar_brand,
+)
+
 # ==================== 页面配置 ====================
 st.set_page_config(page_title="健康光计算器 (EML / m-EDI)", layout="wide")
 
@@ -41,6 +51,58 @@ HEADERS = {
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json"
 }
+
+# ==================== 接收门户参数 ====================
+query_params = st.query_params
+
+
+def set_app_language(lang: str):
+    if lang not in ("zh", "en"):
+        lang = "zh"
+    st.session_state.lang = lang
+    st.query_params["lang"] = lang
+
+
+ensure_enterprise_session_defaults()
+
+if "user_id" in query_params or qp_first(query_params, "token"):
+    user_id_val = query_params.get("user_id")
+    if user_id_val is not None:
+        if isinstance(user_id_val, list):
+            st.session_state.user_id = user_id_val[0]
+        else:
+            st.session_state.user_id = user_id_val
+
+    apply_portal_token(query_params, set_app_language=set_app_language)
+
+    email_val = query_params.get("email", "")
+    if isinstance(email_val, list):
+        st.session_state.user_email = email_val[0] if email_val else ""
+    else:
+        st.session_state.user_email = email_val
+
+    if st.session_state.user_email and "@" in st.session_state.user_email:
+        st.session_state.username = st.session_state.user_email.split('@')[0]
+    else:
+        st.session_state.username = "User"
+
+    if "lang" not in st.session_state:
+        if "lang" in query_params:
+            lang_val = query_params["lang"]
+            if isinstance(lang_val, list):
+                lang_val = lang_val[0]
+            set_app_language(lang_val if lang_val in ["zh", "en"] else "zh")
+        else:
+            set_app_language("zh")
+
+    if not st.session_state.get("user_id"):
+        st.warning("请从 TechLife Suite 门户登录后访问")
+        st.stop()
+else:
+    st.warning("请从 TechLife Suite 门户登录后访问")
+    st.stop()
+
+load_enterprise_branding(SUPABASE_URL, HEADERS)
 
 def supabase_get(table: str, user_id: str = None, id_field: str = "id"):
     url = f"{SUPABASE_URL}/rest/v1/{table}"
@@ -119,38 +181,6 @@ def consume_trial(user_id: str, app_name: str) -> tuple:
         
     except Exception as e:
         return False, 0, f"计数失败: {str(e)}"
-
-# ==================== 接收门户参数 ====================
-query_params = st.query_params
-
-if "user_id" in query_params:
-    user_id_val = query_params["user_id"]
-    if isinstance(user_id_val, list):
-        st.session_state.user_id = user_id_val[0]
-    else:
-        st.session_state.user_id = user_id_val
-    
-    email_val = query_params.get("email", "")
-    if isinstance(email_val, list):
-        st.session_state.user_email = email_val[0] if email_val else ""
-    else:
-        st.session_state.user_email = email_val
-    
-    if st.session_state.user_email and "@" in st.session_state.user_email:
-        st.session_state.username = st.session_state.user_email.split('@')[0]
-    else:
-        st.session_state.username = "User"
-    
-    if "lang" in query_params:
-        lang_val = query_params["lang"]
-        if isinstance(lang_val, list):
-            lang_val = lang_val[0]
-        st.session_state.lang = lang_val if lang_val in ["zh", "en"] else "zh"
-    else:
-        st.session_state.lang = "zh"
-else:
-    st.warning("请从 TechLife Suite 门户登录后访问")
-    st.stop()
 
 # ==================== 预设数据（CIE S 026:2018 标准）====================
 # V(λ) 明视觉数据（峰值 555nm = 1.0）
@@ -981,6 +1011,7 @@ def main():
     t = TEXTS[lang]
     
     # 顶部按钮
+    render_enterprise_main_brand()
     col_title, col_lang1, col_lang2, col_admin, col_debug = st.columns([5, 0.8, 0.8, 0.8, 0.8])
     
     with col_title:
@@ -1009,19 +1040,22 @@ def main():
     
     # 侧边栏
     with st.sidebar:
+        render_enterprise_sidebar_brand()
         st.markdown(f"### 👤 {st.session_state.username}")
-        
-        remaining = get_user_remaining_trials(st.session_state.user_id)
-        if remaining == -1:
-            st.info(f"🎫 剩余免费次数: ∞ (专业版)" if lang == "zh" else f"🎫 Remaining Trials: ∞ (Pro)")
-        else:
-            st.info(f"🎫 剩余免费次数: {remaining}" if lang == "zh" else f"🎫 Remaining Trials: {remaining}")
-        
+
+        if not is_enterprise_user():
+            remaining = get_user_remaining_trials(st.session_state.user_id)
+            if remaining == -1:
+                st.info(f"🎫 剩余免费次数: ∞ (专业版)" if lang == "zh" else f"🎫 Remaining Trials: ∞ (Pro)")
+            else:
+                st.info(f"🎫 剩余免费次数: {remaining}" if lang == "zh" else f"🎫 Remaining Trials: {remaining}")
+
         st.markdown("---")
         st.header(t['about_system'])
         st.markdown(t['about_text'])
-        st.markdown("---")
-        st.markdown(t['contact'])
+        if not is_enterprise_user():
+            st.markdown("---")
+            st.markdown(t['contact'])
         st.markdown("---")
         
         analyst_name = st.text_input(t['analyst_name'], placeholder=t['name_placeholder'], key="analyst_name")
